@@ -13,12 +13,114 @@ if CLIENT then
         accent = Color(0, 120, 210, 255),
         accentLight = Color(0, 150, 255, 255),
         text = Color(220, 220, 220, 255),
-        success = Color(0, 200, 0, 255),
+        success = Color(0, 120, 210, 255),
         error = Color(200, 0, 0, 255),
-        border = Color(60, 60, 70, 255)
+        border = Color(60, 60, 70, 255),
+        disabled = Color(100, 100, 100, 255)
     }
 
     local CURRENT_ENTITY = nil
+    local CURRENT_TRAILER = nil
+    local MAIN_VEHICLE = nil -- Основная машина (даже если кликнули по прицепу)
+    local VALIDATOR_LIST_PANEL = nil
+    local MAIN_TABS = nil
+
+    -- Функция для обновления списка валидаторов
+    local function RefreshValidatorList()
+        if IsValid(MAIN_VEHICLE) then
+            net.Start("svas_refresh_validators")
+                net.WriteEntity(MAIN_VEHICLE)
+            net.SendToServer()
+        end
+    end
+
+    -- Функция для создания списка валидаторов
+    local function CreateValidatorList(parent, validators)
+        parent:Clear()
+        
+        if not validators or #validators == 0 then
+            local emptyLabel = vgui.Create("DLabel", parent)
+            emptyLabel:SetText("Нет созданных валидаторов")
+            emptyLabel:SetTextColor(THEME.text)
+            emptyLabel:SetFont("DermaDefault")
+            emptyLabel:SetPos(10, 10)
+            emptyLabel:SizeToContents()
+            return
+        end
+
+        local y = 10
+
+        for i, data in ipairs(validators) do
+            local block = vgui.Create("DPanel", parent)
+            block:SetPos(10, y)
+            block:SetSize(430, 155)
+            block.Paint = function(self, w, h)
+                draw.RoundedBox(6, 0, 0, w, h, THEME.secondary)
+                draw.SimpleText("Валидатор #" .. i, "DermaDefaultBold", 15, 10, THEME.accentLight)
+                draw.SimpleText("Модель: " .. (data.model or "неизвестно"), "DermaDefault", 15, 35, THEME.text)
+                
+                -- Показываем цель (машина или прицеп)
+                local targetText = data.target == "trailer" and "Прицеп" or "Машина"
+                draw.SimpleText("Цель: " .. targetText, "DermaDefault", 15, 52, THEME.accentLight)
+                
+                if data.position then
+                    draw.SimpleText(
+                        "Позиция: " .. string.format("%.1f", data.position.x) .. " " ..
+                        string.format("%.1f", data.position.y) .. " " ..
+                        string.format("%.1f", data.position.z),
+                        "DermaDefault", 15, 69, THEME.text
+                    )
+                end
+                
+                if data.angles then
+                    draw.SimpleText(
+                        "Угол: " .. string.format("%.1f", data.angles.p) .. " " ..
+                        string.format("%.1f", data.angles.y) .. " " ..
+                        string.format("%.1f", data.angles.r),
+                        "DermaDefault", 15, 86, THEME.text
+                    )
+                end
+            end
+
+            -- Кнопка редактирования
+            local editBtn = vgui.Create("DButton", block)
+            editBtn:SetPos(15, 110)
+            editBtn:SetSize(195, 28)
+            editBtn:SetText("")
+            editBtn.Paint = function(self, w, h)
+                draw.RoundedBox(4, 0, 0, w, h, self:IsHovered() and THEME.accentLight or THEME.accent)
+                draw.SimpleText("РЕДАКТИРОВАТЬ #" .. i, "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            end
+            editBtn.DoClick = function()
+                net.Start("svas_edit_validator")
+                    net.WriteEntity(MAIN_VEHICLE)
+                    net.WriteInt(i, 32)
+                net.SendToServer()
+            end
+
+            -- Кнопка удаления
+            local removeBtn = vgui.Create("DButton", block)
+            removeBtn:SetPos(220, 110)
+            removeBtn:SetSize(195, 28)
+            removeBtn:SetText("")
+            removeBtn.Paint = function(self, w, h)
+                draw.RoundedBox(4, 0, 0, w, h, self:IsHovered() and Color(255,50,50) or THEME.error)
+                draw.SimpleText("УДАЛИТЬ #" .. i, "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            end
+            removeBtn.DoClick = function()
+                net.Start("svas_remove_validator")
+                    net.WriteEntity(MAIN_VEHICLE)
+                    net.WriteInt(i, 32)
+                net.SendToServer()
+                
+                timer.Simple(0.2, function()
+                    RefreshValidatorList()
+                end)
+            end
+
+            y = y + 165
+        end
+    end
 
     -- Функция для открытия окна редактирования
     local function OpenEditValidatorFrame(validatorId, validatorData)
@@ -26,255 +128,187 @@ if CLIENT then
             EditFrame:Remove()
         end
 
-        -- Текущие значения для редактирования
         local currentPos = Vector(validatorData.position.x, validatorData.position.y, validatorData.position.z)
         local currentAng = Angle(validatorData.angles.p, validatorData.angles.y, validatorData.angles.r)
+        local currentTarget = validatorData.target or "vehicle"
 
         EditFrame = vgui.Create("DFrame")
-        EditFrame:SetSize(500, 550)
+        EditFrame:SetSize(550, 720)
         EditFrame:Center()
-        EditFrame:SetTitle("Редактирование")
+        EditFrame:SetTitle("")
         EditFrame:SetDraggable(true)
-        EditFrame:ShowCloseButton(true)
+        EditFrame:ShowCloseButton(false)
         EditFrame:MakePopup()
 
         EditFrame.Paint = function(self, w, h)
             draw.RoundedBox(8, 0, 0, w, h, THEME.background)
+            draw.RoundedBox(8, 0, 0, w, 40, THEME.secondary)
+            surface.SetDrawColor(THEME.border)
+            surface.DrawOutlinedRect(0, 0, w, h)
+            draw.SimpleText("РЕДАКТИРОВАНИЕ ВАЛИДАТОРА", "DermaDefaultBold", 15, 12, THEME.accentLight)
+        end
+
+        local close = vgui.Create("DButton", EditFrame)
+        close:SetSize(30, 28)
+        close:SetPos(EditFrame:GetWide() - 38, 6)
+        close:SetText("")
+        close.Paint = function(self, w, h)
+            if self:IsHovered() then
+                draw.RoundedBox(4, 0, 0, w, h, THEME.error)
+            else
+                draw.RoundedBox(4, 0, 0, w, h, Color(0, 0, 0, 0))
+            end
+            draw.SimpleText("X", "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+        close.DoClick = function()
+            EditFrame:Remove()
+        end
+
+        local y = 55
+        local spacing = 45
+
+        -- Информационная панель
+        local infoPanel = vgui.Create("DPanel", EditFrame)
+        infoPanel:SetPos(15, y)
+        infoPanel:SetSize(520, 70)
+        infoPanel.Paint = function(self, w, h)
+            draw.RoundedBox(6, 0, 0, w, h, THEME.secondary)
             surface.SetDrawColor(THEME.border)
             surface.DrawOutlinedRect(0, 0, w, h)
         end
+        
+        local modelIcon = vgui.Create("DLabel", infoPanel)
+        modelIcon:SetPos(15, 15)
+        modelIcon:SetText("Модель:")
+        modelIcon:SetTextColor(THEME.text)
+        modelIcon:SetFont("DermaDefaultBold")
+        modelIcon:SizeToContents()
+        
+        local modelValue = vgui.Create("DLabel", infoPanel)
+        modelValue:SetPos(80, 15)
+        modelValue:SetText(validatorData.model or "aqsi_cube")
+        modelValue:SetTextColor(THEME.accentLight)
+        modelValue:SetFont("DermaDefault")
+        modelValue:SizeToContents()
 
-        local y = 50
-        local spacing = 45
+        -- Переключатель цели в режиме редактирования
+        local hasTrailer = IsValid(CURRENT_TRAILER)
+        
+        local targetLabel = vgui.Create("DLabel", infoPanel)
+        targetLabel:SetPos(15, 42)
+        targetLabel:SetText("Цель:")
+        targetLabel:SetTextColor(THEME.text)
+        targetLabel:SetFont("DermaDefaultBold")
+        targetLabel:SizeToContents()
 
-        -- Информация
-        local info = vgui.Create("DLabel", EditFrame)
-        info:SetPos(15, y)
-        info:SetText("Модель: " .. (validatorData.model or "aqsi_cube"))
-        info:SetTextColor(THEME.text)
-        info:SizeToContents()
-        y = y + 40
+        local targetCombo = vgui.Create("DComboBox", infoPanel)
+        targetCombo:SetPos(80, 38)
+        targetCombo:SetSize(200, 22)
+        targetCombo:SetValue(currentTarget == "trailer" and "Прицеп" or "Машина")
+        targetCombo:AddChoice("Машина")
+        if hasTrailer then
+            targetCombo:AddChoice("Прицеп")
+        end
+        targetCombo:SetTextColor(THEME.text)
+        targetCombo.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, THEME.background)
+            surface.SetDrawColor(THEME.border)
+            surface.DrawOutlinedRect(0, 0, w, h)
+        end
+        targetCombo.OnSelect = function(panel, index, value)
+            if value == "Прицеп" then
+                currentTarget = "trailer"
+            else
+                currentTarget = "vehicle"
+            end
+        end
+        
+        y = y + 85
 
         -- Заголовок позиции
-        local posTitle = vgui.Create("DLabel", EditFrame)
+        local posTitle = vgui.Create("DPanel", EditFrame)
         posTitle:SetPos(15, y)
-        posTitle:SetText("ПОЗИЦИЯ")
-        posTitle:SetTextColor(THEME.accentLight)
-        posTitle:SetFont("DermaDefaultBold")
-        posTitle:SizeToContents()
-        y = y + 25
+        posTitle:SetSize(520, 30)
+        posTitle.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, Color(0, 120, 210, 40))
+            draw.SimpleText("ПОЗИЦИЯ", "DermaDefaultBold", 15, h/2, THEME.accentLight, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        end
+        y = y + 40
 
-        -- Позиция X
-        local xLabel = vgui.Create("DLabel", EditFrame)
-        xLabel:SetPos(15, y)
-        xLabel:SetText("X:")
-        xLabel:SetTextColor(THEME.text)
-        xLabel:SizeToContents()
+        -- Функция для создания панели с слайдером
+        local function CreateSliderPanel(parent, yPos, label, min, max, currentVal, onChanged)
+            local panel = vgui.Create("DPanel", parent)
+            panel:SetPos(15, yPos)
+            panel:SetSize(520, 35)
+            panel.Paint = function(self, w, h)
+                draw.RoundedBox(4, 0, 0, w, h, Color(40, 40, 45, 255))
+            end
 
-        local xSlider = vgui.Create("DNumSlider", EditFrame)
-        xSlider:SetPos(60, y - 5)
-        xSlider:SetSize(300, 25)
-        xSlider:SetText("")
-        xSlider:SetMin(-165)
-        xSlider:SetMax(165)
-        xSlider:SetDecimals(1)
-        xSlider:SetValue(currentPos.x)
-        xSlider.OnValueChanged = function(slider, val)
-            currentPos.x = math.Round(val)
+            local lbl = vgui.Create("DLabel", panel)
+            lbl:SetPos(15, 9)
+            lbl:SetText(label .. ":")
+            lbl:SetTextColor(THEME.text)
+            lbl:SetFont("DermaDefaultBold")
+            lbl:SizeToContents()
+
+            local slider = vgui.Create("DNumSlider", panel)
+            slider:SetPos(50, 2)
+            slider:SetSize(380, 25)
+            slider:SetText("")
+            slider:SetMin(min)
+            slider:SetMax(max)
+            slider:SetDecimals(1)
+            slider:SetValue(currentVal)
+
+            local wang = vgui.Create("DNumberWang", panel)
+            wang:SetPos(440, 5)
+            wang:SetSize(65, 22)
+            wang:SetMin(min)
+            wang:SetMax(max)
+            wang:SetDecimals(1)
+            wang:SetValue(currentVal)
+
+            slider.OnValueChanged = function(sl, val)
+                wang:SetValue(val)
+                onChanged(val)
+            end
+
+            wang.OnValueChanged = function(wng, val)
+                slider:SetValue(val)
+                onChanged(val)
+            end
+
+            return panel
         end
 
-        local xWang = vgui.Create("DNumberWang", EditFrame)
-        xWang:SetPos(370, y - 3)
-        xWang:SetSize(110, 22)
-        xWang:SetMin(-165)
-        xWang:SetMax(165)
-        xWang:SetDecimals(1)
-        xWang:SetValue(currentPos.x)
-        xWang.OnValueChanged = function(wang, val)
-            currentPos.x = val
-            xSlider:SetValue(val)
-        end
-
+        CreateSliderPanel(EditFrame, y, "X", -165, 165, currentPos.x, function(val) currentPos.x = val end)
         y = y + spacing
-
-        -- Позиция Y
-        local yLabel = vgui.Create("DLabel", EditFrame)
-        yLabel:SetPos(15, y)
-        yLabel:SetText("Y:")
-        yLabel:SetTextColor(THEME.text)
-        yLabel:SizeToContents()
-
-        local ySlider = vgui.Create("DNumSlider", EditFrame)
-        ySlider:SetPos(60, y - 5)
-        ySlider:SetSize(300, 25)
-        ySlider:SetText("")
-        ySlider:SetMin(-43)
-        ySlider:SetMax(43)
-        ySlider:SetDecimals(1)
-        ySlider:SetValue(currentPos.y)
-        ySlider.OnValueChanged = function(slider, val)
-            currentPos.y = math.Round(val)
-        end
-
-        local yWang = vgui.Create("DNumberWang", EditFrame)
-        yWang:SetPos(370, y - 3)
-        yWang:SetSize(110, 22)
-        yWang:SetMin(-43)
-        yWang:SetMax(43)
-        yWang:SetDecimals(1)
-        yWang:SetValue(currentPos.y)
-        yWang.OnValueChanged = function(wang, val)
-            currentPos.y = val
-            ySlider:SetValue(val)
-        end
-
+        CreateSliderPanel(EditFrame, y, "Y", -43, 43, currentPos.y, function(val) currentPos.y = val end)
         y = y + spacing
-
-        -- Позиция Z
-        local zLabel = vgui.Create("DLabel", EditFrame)
-        zLabel:SetPos(15, y)
-        zLabel:SetText("Z:")
-        zLabel:SetTextColor(THEME.text)
-        zLabel:SizeToContents()
-
-        local zSlider = vgui.Create("DNumSlider", EditFrame)
-        zSlider:SetPos(60, y - 5)
-        zSlider:SetSize(300, 25)
-        zSlider:SetText("")
-        zSlider:SetMin(-20)
-        zSlider:SetMax(20)
-        zSlider:SetDecimals(1)
-        zSlider:SetValue(currentPos.z)
-        zSlider.OnValueChanged = function(slider, val)
-            currentPos.z = math.Round(val)
-        end
-
-        local zWang = vgui.Create("DNumberWang", EditFrame)
-        zWang:SetPos(370, y - 3)
-        zWang:SetSize(110, 22)
-        zWang:SetMin(-20)
-        zWang:SetMax(20)
-        zWang:SetDecimals(1)
-        zWang:SetValue(currentPos.z)
-        zWang.OnValueChanged = function(wang, val)
-            currentPos.z = val
-            zSlider:SetValue(val)
-        end
-
+        CreateSliderPanel(EditFrame, y, "Z", -20, 35, currentPos.z, function(val) currentPos.z = val end)
         y = y + spacing + 10
 
         -- Заголовок углов
-        local angTitle = vgui.Create("DLabel", EditFrame)
+        local angTitle = vgui.Create("DPanel", EditFrame)
         angTitle:SetPos(15, y)
-        angTitle:SetText("УГЛЫ (Градусы)")
-        angTitle:SetTextColor(THEME.accentLight)
-        angTitle:SetFont("DermaDefaultBold")
-        angTitle:SizeToContents()
-        y = y + 25
-
-        -- Угол Pitch
-        local pitchLabel = vgui.Create("DLabel", EditFrame)
-        pitchLabel:SetPos(15, y)
-        pitchLabel:SetText("Pitch:")
-        pitchLabel:SetTextColor(THEME.text)
-        pitchLabel:SizeToContents()
-
-        local pitchSlider = vgui.Create("DNumSlider", EditFrame)
-        pitchSlider:SetPos(80, y - 5)
-        pitchSlider:SetSize(280, 25)
-        pitchSlider:SetText("")
-        pitchSlider:SetMin(-180)
-        pitchSlider:SetMax(180)
-        pitchSlider:SetDecimals(0)
-        pitchSlider:SetValue(currentAng.p)
-        pitchSlider.OnValueChanged = function(slider, val)
-            currentAng.p = math.Round(val)
+        angTitle:SetSize(520, 30)
+        angTitle.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, Color(0, 120, 210, 40))
+            draw.SimpleText("УГЛЫ (Градусы)", "DermaDefaultBold", 15, h/2, THEME.accentLight, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         end
+        y = y + 40
 
-        local pitchWang = vgui.Create("DNumberWang", EditFrame)
-        pitchWang:SetPos(370, y - 3)
-        pitchWang:SetSize(110, 22)
-        pitchWang:SetMin(-180)
-        pitchWang:SetMax(180)
-        pitchWang:SetDecimals(0)
-        pitchWang:SetValue(currentAng.p)
-        pitchWang.OnValueChanged = function(wang, val)
-            currentAng.p = val
-            pitchSlider:SetValue(val)
-        end
-
+        CreateSliderPanel(EditFrame, y, "Pitch", -180, 180, currentAng.p, function(val) currentAng.p = val end)
         y = y + spacing
-
-        -- Угол Yaw
-        local yawLabel = vgui.Create("DLabel", EditFrame)
-        yawLabel:SetPos(15, y)
-        yawLabel:SetText("Yaw:")
-        yawLabel:SetTextColor(THEME.text)
-        yawLabel:SizeToContents()
-
-        local yawSlider = vgui.Create("DNumSlider", EditFrame)
-        yawSlider:SetPos(80, y - 5)
-        yawSlider:SetSize(280, 25)
-        yawSlider:SetText("")
-        yawSlider:SetMin(-180)
-        yawSlider:SetMax(180)
-        yawSlider:SetDecimals(0)
-        yawSlider:SetValue(currentAng.y)
-        yawSlider.OnValueChanged = function(slider, val)
-            currentAng.y = math.Round(val)
-        end
-
-        local yawWang = vgui.Create("DNumberWang", EditFrame)
-        yawWang:SetPos(370, y - 3)
-        yawWang:SetSize(110, 22)
-        yawWang:SetMin(-180)
-        yawWang:SetMax(180)
-        yawWang:SetDecimals(0)
-        yawWang:SetValue(currentAng.y)
-        yawWang.OnValueChanged = function(wang, val)
-            currentAng.y = val
-            yawSlider:SetValue(val)
-        end
-
+        CreateSliderPanel(EditFrame, y, "Yaw", -180, 180, currentAng.y, function(val) currentAng.y = val end)
         y = y + spacing
-
-        -- Угол Roll
-        local rollLabel = vgui.Create("DLabel", EditFrame)
-        rollLabel:SetPos(15, y)
-        rollLabel:SetText("Roll:")
-        rollLabel:SetTextColor(THEME.text)
-        rollLabel:SizeToContents()
-
-        local rollSlider = vgui.Create("DNumSlider", EditFrame)
-        rollSlider:SetPos(80, y - 5)
-        rollSlider:SetSize(280, 25)
-        rollSlider:SetText("")
-        rollSlider:SetMin(-180)
-        rollSlider:SetMax(180)
-        rollSlider:SetDecimals(0)
-        rollSlider:SetValue(currentAng.r)
-        rollSlider.OnValueChanged = function(slider, val)
-            currentAng.r = math.Round(val)
-        end
-
-        local rollWang = vgui.Create("DNumberWang", EditFrame)
-        rollWang:SetPos(370, y - 3)
-        rollWang:SetSize(110, 22)
-        rollWang:SetMin(-180)
-        rollWang:SetMax(180)
-        rollWang:SetDecimals(0)
-        rollWang:SetValue(currentAng.r)
-        rollWang.OnValueChanged = function(wang, val)
-            currentAng.r = val
-            rollSlider:SetValue(val)
-        end
-
+        CreateSliderPanel(EditFrame, y, "Roll", -180, 180, currentAng.r, function(val) currentAng.r = val end)
         y = y + spacing + 20
 
         -- Кнопка Сохранить
         local saveBtn = vgui.Create("DButton", EditFrame)
         saveBtn:SetPos(15, y)
-        saveBtn:SetSize(230, 40)
+        saveBtn:SetSize(250, 40)
         saveBtn:SetText("")
         saveBtn.Paint = function(self, w, h)
             if self:IsHovered() then
@@ -286,18 +320,23 @@ if CLIENT then
         end
         saveBtn.DoClick = function()
             net.Start("svas_update_validator")
-                net.WriteEntity(CURRENT_ENTITY)
+                net.WriteEntity(MAIN_VEHICLE)
                 net.WriteInt(validatorId, 32)
                 net.WriteVector(currentPos)
                 net.WriteAngle(currentAng)
+                net.WriteString(currentTarget)
             net.SendToServer()
             EditFrame:Remove()
+            
+            timer.Simple(0.2, function()
+                RefreshValidatorList()
+            end)
         end
 
         -- Кнопка Отмена
         local cancelBtn = vgui.Create("DButton", EditFrame)
-        cancelBtn:SetPos(255, y)
-        cancelBtn:SetSize(230, 40)
+        cancelBtn:SetPos(285, y)
+        cancelBtn:SetSize(250, 40)
         cancelBtn:SetText("")
         cancelBtn.Paint = function(self, w, h)
             if self:IsHovered() then
@@ -312,167 +351,12 @@ if CLIENT then
         end
     end
 
-    local function CreateValidatorEditor(parent, validators)
-
-        local panel = vgui.Create("DScrollPanel", parent)
-        panel:Dock(FILL)
-
-        if not validators or #validators == 0 then
-            local emptyLabel = vgui.Create("DLabel", panel)
-            emptyLabel:SetText("Нет созданных валидаторов")
-            emptyLabel:SetTextColor(THEME.text)
-            emptyLabel:SetFont("DermaDefault")
-            emptyLabel:SetPos(10, 10)
-            emptyLabel:SizeToContents()
-            
-            return panel
-        end
-
-        local y = 10
-
-        for i, data in ipairs(validators) do
-
-            local block = vgui.Create("DPanel", panel)
-            block:SetPos(10, y)
-            block:SetSize(430, 140)
-
-            block.Paint = function(self, w, h)
-
-                draw.RoundedBox(6, 0, 0, w, h, THEME.secondary)
-
-                draw.SimpleText(
-                    "Валидатор #" .. i,
-                    "DermaDefaultBold",
-                    15,
-                    10,
-                    THEME.accentLight
-                )
-
-                draw.SimpleText(
-                    "Модель: " .. (data.model or "неизвестно"),
-                    "DermaDefault",
-                    15,
-                    35,
-                    THEME.text
-                )
-
-                if data.position then
-                    draw.SimpleText(
-                        "Позиция: " ..
-                        math.Round(data.position.x) .. " " ..
-                        math.Round(data.position.y) .. " " ..
-                        math.Round(data.position.z),
-                        "DermaDefault",
-                        15,
-                        55,
-                        THEME.text
-                    )
-                end
-
-                if data.angles then
-                    draw.SimpleText(
-                        "Угол: " ..
-                        math.Round(data.angles.p) .. " " ..
-                        math.Round(data.angles.y) .. " " ..
-                        math.Round(data.angles.r),
-                        "DermaDefault",
-                        15,
-                        75,
-                        THEME.text
-                    )
-                end
-
-            end
-
-            -- Кнопка редактирования
-            local editBtn = vgui.Create("DButton", block)
-            editBtn:SetPos(15, 95)
-            editBtn:SetSize(195, 28)
-            editBtn:SetText("")
-
-            editBtn.Paint = function(self, w, h)
-                draw.RoundedBox(
-                    4,
-                    0,
-                    0,
-                    w,
-                    h,
-                    self:IsHovered()
-                        and THEME.accentLight
-                        or THEME.accent
-                )
-                draw.SimpleText(
-                    "РЕДАКТИРОВАТЬ #" .. i,
-                    "DermaDefaultBold",
-                    w / 2,
-                    h / 2,
-                    color_white,
-                    TEXT_ALIGN_CENTER,
-                    TEXT_ALIGN_CENTER
-                )
-            end
-
-            editBtn.DoClick = function()
-                net.Start("svas_edit_validator")
-                    net.WriteEntity(CURRENT_ENTITY)
-                    net.WriteInt(i, 32)
-                net.SendToServer()
-            end
-
-            -- Кнопка удаления
-            local removeBtn = vgui.Create("DButton", block)
-            removeBtn:SetPos(220, 95)
-            removeBtn:SetSize(195, 28)
-            removeBtn:SetText("")
-
-            removeBtn.Paint = function(self, w, h)
-                draw.RoundedBox(
-                    4,
-                    0,
-                    0,
-                    w,
-                    h,
-                    self:IsHovered()
-                        and Color(255,50,50)
-                        or THEME.error
-                )
-                draw.SimpleText(
-                    "УДАЛИТЬ #" .. i,
-                    "DermaDefaultBold",
-                    w / 2,
-                    h / 2,
-                    color_white,
-                    TEXT_ALIGN_CENTER,
-                    TEXT_ALIGN_CENTER
-                )
-            end
-
-            removeBtn.DoClick = function()
-                net.Start("svas_remove_validator")
-                    net.WriteEntity(CURRENT_ENTITY)
-                    net.WriteInt(i, 32)
-                net.SendToServer()
-                
-                block:Remove()
-            end
-
-            y = y + 150
-
-        end
-
-        return panel
-
-    end
-
+    -- Создание вкладки добавления валидатора
     local function CreateAddValidatorTab(parent)
-
         local panel = vgui.Create("DPanel", parent)
         panel:Dock(FILL)
-
         panel.Paint = function(self, w, h)
-
             draw.RoundedBox(4, 0, 0, w, h, THEME.secondary)
-
         end
 
         local modelLabel = vgui.Create("DLabel", panel)
@@ -489,63 +373,82 @@ if CLIENT then
         modelCombo:AddChoice("aqsi_cube")
         modelCombo:AddChoice("bm20")
         modelCombo:SetTextColor(THEME.text)
-
         modelCombo.Paint = function(self, w, h)
-
             draw.RoundedBox(4, 0, 0, w, h, THEME.background)
-
             surface.SetDrawColor(THEME.border)
             surface.DrawOutlinedRect(0, 0, w, h)
+        end
 
+        -- Переключатель цели
+        local hasTrailer = IsValid(CURRENT_TRAILER)
+        
+        local targetLabel = vgui.Create("DLabel", panel)
+        targetLabel:SetPos(20, 100)
+        targetLabel:SetSize(380, 20)
+        targetLabel:SetText("Выберите цель:")
+        targetLabel:SetTextColor(THEME.text)
+        targetLabel:SetFont("DermaDefault")
+
+        local targetCombo = vgui.Create("DComboBox", panel)
+        targetCombo:SetPos(20, 130)
+        targetCombo:SetSize(380, 30)
+        targetCombo:SetValue("Машина")
+        targetCombo:AddChoice("Машина")
+        
+        if hasTrailer then
+            targetCombo:AddChoice("Прицеп")
+        end
+        
+        targetCombo:SetTextColor(THEME.text)
+        targetCombo.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, THEME.background)
+            surface.SetDrawColor(THEME.border)
+            surface.DrawOutlinedRect(0, 0, w, h)
+        end
+
+        if not hasTrailer then
+            -- Показываем сообщение, если прицепа нет
+            local noTrailerLabel = vgui.Create("DLabel", panel)
+            noTrailerLabel:SetPos(20, 165)
+            noTrailerLabel:SetSize(380, 20)
+            noTrailerLabel:SetText("Прицеп отсутствует")
+            noTrailerLabel:SetTextColor(THEME.disabled)
+            noTrailerLabel:SetFont("DermaDefault")
         end
 
         local add = vgui.Create("DButton", panel)
-        add:SetPos(20, 110)
+        add:SetPos(20, 200)
         add:SetSize(380, 40)
         add:SetText("")
-
         add.Paint = function(self, w, h)
-
-            draw.RoundedBox(
-                4,
-                0,
-                0,
-                w,
-                h,
-                self:IsHovered()
-                    and THEME.accentLight
-                    or THEME.accent
-            )
-
-            draw.SimpleText(
-                "СОЗДАТЬ ВАЛИДАТОР",
-                "DermaDefaultBold",
-                w / 2,
-                h / 2,
-                color_white,
-                TEXT_ALIGN_CENTER,
-                TEXT_ALIGN_CENTER
-            )
-
+            draw.RoundedBox(4, 0, 0, w, h, self:IsHovered() and THEME.accentLight or THEME.accent)
+            draw.SimpleText("СОЗДАТЬ ВАЛИДАТОР", "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
         end
-
         add.DoClick = function()
             local selectedModel = string.lower(modelCombo:GetValue())
             if selectedModel == "" then return end
 
+            local target = targetCombo:GetValue() == "Прицеп" and "trailer" or "vehicle"
+
             net.Start("svas_create_validator")
-                net.WriteEntity(CURRENT_ENTITY)
+                net.WriteEntity(MAIN_VEHICLE)
                 net.WriteString(selectedModel)
+                net.WriteString(target)
             net.SendToServer()
+            
+            timer.Simple(0.2, function()
+                RefreshValidatorList()
+            end)
         end
 
         return panel
-
     end
 
+    -- Создание главного окна
     local function CreateMainFrame(data)
-
         CURRENT_ENTITY = data.entity
+        CURRENT_TRAILER = data.trailerEntity
+        MAIN_VEHICLE = data.mainVehicle -- Основная машина
 
         if IsValid(SVAS_Frame) then
             SVAS_Frame:Remove()
@@ -559,151 +462,76 @@ if CLIENT then
         SVAS_Frame:MakePopup()
 
         SVAS_Frame.Paint = function(self, w, h)
-
             draw.RoundedBox(8, 0, 0, w, h, THEME.background)
-
             draw.RoundedBox(8, 0, 0, w, 35, THEME.secondary)
-
-            draw.SimpleText(
-                "SVAS VALIDATOR MANAGER",
-                "DermaDefaultBold",
-                15,
-                10,
-                THEME.accentLight
-            )
-
+            draw.SimpleText("SVAS VALIDATOR MANAGER", "DermaDefaultBold", 15, 10, THEME.accentLight)
             surface.SetDrawColor(THEME.border)
             surface.DrawOutlinedRect(0, 0, w, h)
-
         end
 
         local close = vgui.Create("DButton", SVAS_Frame)
         close:SetSize(30, 25)
         close:SetPos(460, 5)
         close:SetText("")
-
         close.Paint = function(self, w, h)
-
-            draw.RoundedBox(
-                4,
-                0,
-                0,
-                w,
-                h,
-                self:IsHovered()
-                    and THEME.error
-                    or Color(0,0,0,0)
-            )
-
-            draw.SimpleText(
-                "X",
-                "DermaDefaultBold",
-                w / 2,
-                h / 2,
-                color_white,
-                TEXT_ALIGN_CENTER,
-                TEXT_ALIGN_CENTER
-            )
-
+            draw.RoundedBox(4, 0, 0, w, h, self:IsHovered() and THEME.error or Color(0,0,0,0))
+            draw.SimpleText("X", "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
         end
-
         close.DoClick = function()
-
             SVAS_Frame:Remove()
-
         end
 
         local info = vgui.Create("DPanel", SVAS_Frame)
         info:SetPos(15, 50)
         info:SetSize(470, 100)
-
         info.Paint = function(self, w, h)
-
             draw.RoundedBox(6, 0, 0, w, h, THEME.secondary)
-
-            draw.SimpleText(
-                "Транспорт: " .. data.vehicleClass,
-                "DermaDefaultBold",
-                15,
-                20,
-                THEME.text
-            )
-
-            draw.SimpleText(
-                "Название: " .. data.vehicleName,
-                "DermaDefault",
-                15,
-                45,
-                THEME.text
-            )
-
-            draw.SimpleText(
-                "Трейлер: " ..
-                (
-                    data.trailerClass ~= ""
-                    and data.trailerClass
-                    or "отсутствует"
-                ),
-                "DermaDefault",
-                15,
-                70,
-                THEME.text
-            )
-
+            draw.SimpleText("Транспорт: " .. data.vehicleClass, "DermaDefaultBold", 15, 20, THEME.text)
+            draw.SimpleText("Название: " .. data.vehicleName, "DermaDefault", 15, 45, THEME.text)
+            
+            local trailerText = data.trailerClass ~= "" and data.trailerClass or "отсутствует"
+            if IsValid(CURRENT_TRAILER) then
+                trailerText = trailerText .. " (прикреплен)"
+            end
+            draw.SimpleText("Трейлер: " .. trailerText, "DermaDefault", 15, 70, THEME.text)
         end
 
-        local tabs = vgui.Create("DPropertySheet", SVAS_Frame)
-        tabs:SetPos(15, 165)
-        tabs:SetSize(470, 365)
+        MAIN_TABS = vgui.Create("DPropertySheet", SVAS_Frame)
+        MAIN_TABS:SetPos(15, 165)
+        MAIN_TABS:SetSize(470, 365)
 
-        local validators = CreateValidatorEditor(tabs, data.validators)
-        local create = CreateAddValidatorTab(tabs)
+        -- Создаем панель для списка валидаторов
+        VALIDATOR_LIST_PANEL = vgui.Create("DScrollPanel")
+        CreateValidatorList(VALIDATOR_LIST_PANEL, data.validators)
+        
+        local addTab = CreateAddValidatorTab()
 
-        local settings = vgui.Create("DPanel", tabs)
-        settings:Dock(FILL)
-
+        local settings = vgui.Create("DPanel")
         settings.Paint = function(self, w, h)
-
-            draw.RoundedBox(4,0,0,w,h,THEME.secondary)
-
-            draw.SimpleText(
-                "Настройки транспорта",
-                "DermaDefaultBold",
-                w/2,
-                h/2,
-                THEME.text,
-                TEXT_ALIGN_CENTER,
-                TEXT_ALIGN_CENTER
-            )
-
+            draw.RoundedBox(4, 0, 0, w, h, THEME.secondary)
+            draw.SimpleText("Настройки транспорта", "DermaDefaultBold", w/2, h/2, THEME.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
         end
 
-        tabs:AddSheet(
-            "Валидаторы",
-            validators,
-            "icon16/group.png"
-        )
-
-        tabs:AddSheet(
-            "Добавить",
-            create,
-            "icon16/add.png"
-        )
-
-        tabs:AddSheet(
-            "Настройки",
-            settings,
-            "icon16/cog.png"
-        )
-
+        MAIN_TABS:AddSheet("Валидаторы", VALIDATOR_LIST_PANEL, "icon16/group.png")
+        MAIN_TABS:AddSheet("Добавить", addTab, "icon16/add.png")
+        MAIN_TABS:AddSheet("Настройки", settings, "icon16/cog.png")
     end
 
-    net.Receive("validator_open_menu", function()
+    -- Сетевые обработчики
+    net.Receive("svas_refresh_validators_response", function()
+        if IsValid(VALIDATOR_LIST_PANEL) then
+            local validators = net.ReadTable()
+            CreateValidatorList(VALIDATOR_LIST_PANEL, validators)
+        end
+    end)
 
+    net.Receive("validator_open_menu", function()
         local entity = net.ReadEntity()
         local vehicleClass = net.ReadString()
         local vehicleName = net.ReadString()
         local trailerClass = net.ReadString()
+        local trailerEntity = net.ReadEntity()
+        local mainVehicle = net.ReadEntity()
         local validators = net.ReadTable()
 
         CreateMainFrame({
@@ -711,9 +539,10 @@ if CLIENT then
             vehicleClass = vehicleClass,
             vehicleName = vehicleName,
             trailerClass = trailerClass,
+            trailerEntity = trailerEntity,
+            mainVehicle = mainVehicle,
             validators = validators
         })
-
     end)
 
     net.Receive("svas_open_edit_menu", function()
@@ -721,7 +550,13 @@ if CLIENT then
         local validatorId = net.ReadInt(32)
         local validatorData = net.ReadTable()
 
+        MAIN_VEHICLE = entity
         CURRENT_ENTITY = entity
+        
+        -- Получаем прицеп если есть
+        if IsValid(entity) then
+            CURRENT_TRAILER = entity.SVASTrailer or nil
+        end
         OpenEditValidatorFrame(validatorId, validatorData)
     end)
 
@@ -735,6 +570,8 @@ if SERVER then
     util.AddNetworkString("svas_edit_validator")
     util.AddNetworkString("svas_update_validator")
     util.AddNetworkString("svas_open_edit_menu")
+    util.AddNetworkString("svas_refresh_validators")
+    util.AddNetworkString("svas_refresh_validators_response")
 
     local function SaveValidatorData(ent, data)
         ent:SetNW2String("SVAS_Validators", util.TableToJSON(data))
@@ -751,11 +588,194 @@ if SERVER then
         return 5
     end
 
+    local function FindTrailer(vehicle)
+        if not IsValid(vehicle) then return nil end
+        
+        -- Способ 1: Поиск через Parent
+        local children = vehicle:GetChildren()
+        for _, child in ipairs(children) do
+            if IsValid(child) then
+                local childClass = child:GetClass()
+                
+                -- Проверяем, является ли ребенок прицепом по данным из БД
+                local query = "SELECT class FROM " .. TABLE_SERVER .. " WHERE class = " .. sql.SQLStr(childClass)
+                local result = sql.Query(query)
+                
+                if result and result[1] then
+                    -- Проверяем, есть ли у этого класса trailer_class (значит это машина, у которой может быть прицеп)
+                    local trailerQuery = "SELECT trailer_class FROM " .. TABLE_SERVER .. " WHERE class = " .. sql.SQLStr(childClass)
+                    local trailerResult = sql.Query(trailerQuery)
+                    
+                    -- Если у найденного энтити нет trailer_class, значит это может быть прицеп
+                    if trailerResult and trailerResult[1] and (trailerResult[1].trailer_class == "" or trailerResult[1].trailer_class == nil) then
+                        return child
+                    end
+                end
+            end
+        end
+        
+        -- Способ 2: Поиск через trailer_class в БД
+        local vehicleClass = vehicle:GetClass()
+        local query = "SELECT trailer_class FROM " .. TABLE_SERVER .. " WHERE class = " .. sql.SQLStr(vehicleClass)
+        local result = sql.Query(query)
+        
+        if result and result[1] and result[1].trailer_class and result[1].trailer_class != "" then
+            local trailerClass = result[1].trailer_class
+            
+            -- Ищем среди всех энтити рядом с машиной
+            local nearbyEnts = ents.FindInSphere(vehicle:GetPos(), 500)
+            for _, ent in ipairs(nearbyEnts) do
+                if IsValid(ent) and ent != vehicle then
+                    if ent:GetClass() == trailerClass then
+                        return ent
+                    end
+                end
+            end
+            
+            -- Ищем среди детей
+            for _, child in ipairs(children) do
+                if IsValid(child) and child:GetClass() == trailerClass then
+                    return child
+                end
+            end
+        end
+        
+        -- Способ 3: Поиск через constraints
+        local constraints = constraint.GetTable(vehicle)
+        if constraints then
+            for _, c in ipairs(constraints) do
+                local other = nil
+                if c.Ent1 == vehicle then
+                    other = c.Ent2
+                elseif c.Ent2 == vehicle then
+                    other = c.Ent1
+                end
+                
+                if IsValid(other) and other != vehicle then
+                    local otherClass = other:GetClass()
+                    
+                    -- Проверяем через БД, является ли это прицепом
+                    local checkQuery = "SELECT class FROM " .. TABLE_SERVER .. " WHERE class = " .. sql.SQLStr(otherClass)
+                    local checkResult = sql.Query(checkQuery)
+                    
+                    if checkResult and checkResult[1] then
+                        local trailerCheckQuery = "SELECT trailer_class FROM " .. TABLE_SERVER .. " WHERE class = " .. sql.SQLStr(otherClass)
+                        local trailerCheckResult = sql.Query(trailerCheckQuery)
+                        
+                        if trailerCheckResult and trailerCheckResult[1] and (trailerCheckResult[1].trailer_class == "" or trailerCheckResult[1].trailer_class == nil) then
+                            return other
+                        end
+                    end
+                end
+            end
+        end
+        
+        return nil
+    end
+
+    local function FindMainVehicle(ent)
+        if not IsValid(ent) then return nil end
+        
+        -- Проверяем, является ли ent прицепом (ищем его основную машину)
+        local entClass = ent:GetClass()
+        
+        -- Проверяем, есть ли этот класс как trailer_class у какой-либо машины
+        local query = "SELECT class FROM " .. TABLE_SERVER .. " WHERE trailer_class = " .. sql.SQLStr(entClass)
+        local result = sql.Query(query)
+        
+        if result and result[1] then
+            -- Этот ent - прицеп, ищем основную машину
+            local mainClass = result[1].class
+            
+            -- Ищем основную машину через parent
+            local parent = ent:GetParent()
+            if IsValid(parent) and parent:GetClass() == mainClass then
+                return parent
+            end
+            
+            -- Ищем через constraints
+            local constraints = constraint.GetTable(ent)
+            if constraints then
+                for _, c in ipairs(constraints) do
+                    local other = nil
+                    if c.Ent1 == ent then
+                        other = c.Ent2
+                    elseif c.Ent2 == ent then
+                        other = c.Ent1
+                    end
+                    
+                    if IsValid(other) and other:GetClass() == mainClass then
+                        return other
+                    end
+                end
+            end
+            
+            -- Ищем рядом
+            local nearbyEnts = ents.FindInSphere(ent:GetPos(), 500)
+            for _, nearby in ipairs(nearbyEnts) do
+                if IsValid(nearby) and nearby:GetClass() == mainClass then
+                    return nearby
+                end
+            end
+        end
+        
+        -- Если не нашли, значит ent сам является основной машиной
+        return ent
+    end
+
+    local function GetMainVehicle(ent)
+        -- Если у ent уже есть ссылка на основную машину, возвращаем её
+        if IsValid(ent.SVASMainVehicle) then
+            return ent.SVASMainVehicle
+        end
+        
+        local mainVehicle = FindMainVehicle(ent)
+        
+        if IsValid(mainVehicle) then
+            -- Сохраняем ссылки в обе стороны
+            mainVehicle.SVASMainVehicle = mainVehicle
+            ent.SVASMainVehicle = mainVehicle
+            
+            -- Если нашли прицеп, сохраняем ссылку и в машине
+            if mainVehicle != ent then
+                mainVehicle.SVASTrailer = ent
+                ent.SVASTrailer = ent
+            end
+            
+            return mainVehicle
+        end
+        
+        return ent
+    end
+
     local function SpawnValidatorOnVehicle(vehicle, validatorData)
         local entityClass = string.lower(validatorData.model) == "bm20" and "bm20" or "aqsi_cube"
         
-        local worldPos = vehicle:LocalToWorld(validatorData.position)
-        local worldAng = vehicle:LocalToWorldAngles(validatorData.angles)
+        -- Получаем основную машину
+        local mainVehicle = GetMainVehicle(vehicle)
+        
+        -- Определяем родительский энтити
+        local parentEnt = mainVehicle
+        if validatorData.target == "trailer" then
+            local trailer = mainVehicle.SVASTrailer
+            if not IsValid(trailer) then
+                trailer = FindTrailer(mainVehicle)
+                if IsValid(trailer) then
+                    mainVehicle.SVASTrailer = trailer
+                    trailer.SVASMainVehicle = mainVehicle
+                end
+            end
+            
+            if IsValid(trailer) then
+                parentEnt = trailer
+                print("[SVAS] Валидатор прикреплен к прицепу: " .. trailer:GetClass())
+            else
+                print("[SVAS] Прицеп не найден, валидатор прикреплен к машине")
+            end
+        end
+        
+        local worldPos = parentEnt:LocalToWorld(validatorData.position)
+        local worldAng = parentEnt:LocalToWorldAngles(validatorData.angles)
         
         local validatorEnt = ents.Create(entityClass)
         if not IsValid(validatorEnt) then 
@@ -766,41 +786,84 @@ if SERVER then
         validatorEnt:SetPos(worldPos)
         validatorEnt:SetAngles(worldAng)
         validatorEnt:Spawn()
-        validatorEnt:SetParent(vehicle)
+        validatorEnt:Activate()
+        
         validatorEnt:SetMoveType(MOVETYPE_NONE)
-        validatorEnt:SetSolid(SOLID_NONE)
+        validatorEnt:SetSolid(SOLID_VPHYSICS)
+        
+        local phys = validatorEnt:GetPhysicsObject()
+        if IsValid(phys) then
+            phys:EnableGravity(false)
+            phys:EnableDrag(false)
+            phys:Wake()
+        end
+        
+        validatorEnt:SetParent(parentEnt)
+        validatorEnt:SetLocalPos(validatorData.position)
+        validatorEnt:SetLocalAngles(validatorData.angles)
+        
+        constraint.Weld(parentEnt, validatorEnt, 0, 0, 0, true, false)
         
         validatorEnt.ValidatorData = {
             model = validatorData.model,
             position = validatorData.position,
             angles = validatorData.angles,
-            parentVehicle = vehicle
+            target = validatorData.target or "vehicle",
+            parentVehicle = mainVehicle,
+            actualParent = parentEnt
         }
         
         return validatorEnt
     end
 
     local function RemoveValidatorsFromVehicle(vehicle)
-        for _, child in ipairs(vehicle:GetChildren()) do
+        local mainVehicle = GetMainVehicle(vehicle)
+        
+        -- Удаляем валидаторы с основной машины
+        local children = mainVehicle:GetChildren()
+        for i = #children, 1, -1 do
+            local child = children[i]
             if IsValid(child) then
                 local class = child:GetClass()
                 if class == "aqsi_cube" or class == "bm20" then
+                    constraint.RemoveConstraints(child, "Weld")
+                    child:SetParent(nil)
                     child:Remove()
+                end
+            end
+        end
+        
+        -- Удаляем валидаторы с прицепа
+        local trailer = mainVehicle.SVASTrailer or FindTrailer(mainVehicle)
+        if IsValid(trailer) then
+            local trailerChildren = trailer:GetChildren()
+            for i = #trailerChildren, 1, -1 do
+                local child = trailerChildren[i]
+                if IsValid(child) then
+                    local class = child:GetClass()
+                    if class == "aqsi_cube" or class == "bm20" then
+                        constraint.RemoveConstraints(child, "Weld")
+                        child:SetParent(nil)
+                        child:Remove()
+                    end
                 end
             end
         end
     end
 
     function addorrm(com, model, imen, ent, num, updateData)
+        -- Получаем основную машину
+        local mainVehicle = GetMainVehicle(ent)
+        
         if com == "add" then
-            if IsValid(ent) then
-                if not ent.Validators then
-                    ent.Validators = {}
+            if IsValid(mainVehicle) then
+                if not mainVehicle.Validators then
+                    mainVehicle.Validators = {}
                 end
                 
-                local maxValidators = GetMaxValidators(ent:GetClass())
+                local maxValidators = GetMaxValidators(mainVehicle:GetClass())
                 
-                if #ent.Validators < maxValidators then
+                if #mainVehicle.Validators < maxValidators then
                     local localPos = Vector(0, 0, 0)
                     local localAng = Angle(0, 0, 0)
                     
@@ -808,31 +871,32 @@ if SERVER then
                         ["model"] = string.lower(model),
                         ["position"] = localPos,
                         ["angles"] = localAng,
-                        ["immedenabled"] = imen
+                        ["immedenabled"] = imen,
+                        ["target"] = updateData or "vehicle"
                     }
-                    table.insert(ent.Validators, base)
-                    SaveValidatorData(ent, ent.Validators)
+                    table.insert(mainVehicle.Validators, base)
+                    SaveValidatorData(mainVehicle, mainVehicle.Validators)
                     
-                    SpawnValidatorOnVehicle(ent, base)
+                    SpawnValidatorOnVehicle(mainVehicle, base)
                     
                     return true
                 else
-                    print("[SVAS] Достигнут максимум валидаторов для " .. ent:GetClass())
+                    print("[SVAS] Достигнут максимум валидаторов для " .. mainVehicle:GetClass())
                     return false
                 end
             else
                 return false
             end
         elseif com == "rm" then
-            if IsValid(ent) and ent.Validators then
-                if num and ent.Validators[num] then
-                    table.remove(ent.Validators, num)
-                    SaveValidatorData(ent, ent.Validators)
+            if IsValid(mainVehicle) and mainVehicle.Validators then
+                if num and mainVehicle.Validators[num] then
+                    table.remove(mainVehicle.Validators, num)
+                    SaveValidatorData(mainVehicle, mainVehicle.Validators)
                     
-                    RemoveValidatorsFromVehicle(ent)
+                    RemoveValidatorsFromVehicle(mainVehicle)
                     
-                    for i, validatorData in ipairs(ent.Validators) do
-                        SpawnValidatorOnVehicle(ent, validatorData)
+                    for i, validatorData in ipairs(mainVehicle.Validators) do
+                        SpawnValidatorOnVehicle(mainVehicle, validatorData)
                     end
                     
                     return true
@@ -844,16 +908,33 @@ if SERVER then
         return false
     end
 
+    net.Receive("svas_refresh_validators", function(_, ply)
+        local vehicle = net.ReadEntity()
+        local mainVehicle = GetMainVehicle(vehicle)
+        
+        if not IsValid(mainVehicle) then return end
+        
+        if not mainVehicle.Validators then
+            mainVehicle.Validators = {}
+        end
+        
+        net.Start("svas_refresh_validators_response")
+            net.WriteTable(mainVehicle.Validators)
+        net.Send(ply)
+    end)
+
     net.Receive("svas_create_validator", function(_, ply)
         local vehicle = net.ReadEntity()
         local validatorType = net.ReadString()
+        local target = net.ReadString() or "vehicle"
+        local mainVehicle = GetMainVehicle(vehicle)
 
-        if not IsValid(vehicle) then return end
+        if not IsValid(mainVehicle) then return end
 
-        local success = addorrm("add", validatorType, false, vehicle, nil)
+        local success = addorrm("add", validatorType, false, mainVehicle, nil, target)
         
         if success then
-            ply:ChatPrint("[SVAS] Валидатор создан.")
+            ply:ChatPrint("[SVAS] Валидатор создан на " .. (target == "trailer" and "прицепе" or "машине") .. ".")
         else
             ply:ChatPrint("[SVAS] Не удалось создать валидатор.")
         end
@@ -862,10 +943,11 @@ if SERVER then
     net.Receive("svas_remove_validator", function(_, ply)
         local vehicle = net.ReadEntity()
         local num = net.ReadInt(32)
+        local mainVehicle = GetMainVehicle(vehicle)
 
-        if not IsValid(vehicle) then return end
+        if not IsValid(mainVehicle) then return end
 
-        local success = addorrm("rm", nil, nil, vehicle, num)
+        local success = addorrm("rm", nil, nil, mainVehicle, num)
         
         if success then
             ply:ChatPrint("[SVAS] Валидатор #" .. num .. " удален.")
@@ -877,18 +959,19 @@ if SERVER then
     net.Receive("svas_edit_validator", function(_, ply)
         local vehicle = net.ReadEntity()
         local num = net.ReadInt(32)
+        local mainVehicle = GetMainVehicle(vehicle)
 
-        if not IsValid(vehicle) then return end
+        if not IsValid(mainVehicle) then return end
 
-        if not vehicle.Validators then
-            vehicle.Validators = {}
+        if not mainVehicle.Validators then
+            mainVehicle.Validators = {}
         end
 
-        if num and vehicle.Validators[num] then
+        if num and mainVehicle.Validators[num] then
             net.Start("svas_open_edit_menu")
-                net.WriteEntity(vehicle)
+                net.WriteEntity(mainVehicle)
                 net.WriteInt(num, 32)
-                net.WriteTable(vehicle.Validators[num])
+                net.WriteTable(mainVehicle.Validators[num])
             net.Send(ply)
         else
             ply:ChatPrint("[SVAS] Валидатор #" .. num .. " не найден!")
@@ -900,24 +983,25 @@ if SERVER then
         local num = net.ReadInt(32)
         local newPos = net.ReadVector()
         local newAng = net.ReadAngle()
+        local newTarget = net.ReadString() or "vehicle"
+        local mainVehicle = GetMainVehicle(vehicle)
 
-        if not IsValid(vehicle) then return end
+        if not IsValid(mainVehicle) then return end
 
-        if not vehicle.Validators then
-            vehicle.Validators = {}
+        if not mainVehicle.Validators then
+            mainVehicle.Validators = {}
         end
 
-        if num and vehicle.Validators[num] then
-            -- Заменяем старые координаты новыми
-            vehicle.Validators[num].position = newPos
-            vehicle.Validators[num].angles = newAng
+        if num and mainVehicle.Validators[num] then
+            mainVehicle.Validators[num].position = newPos
+            mainVehicle.Validators[num].angles = newAng
+            mainVehicle.Validators[num].target = newTarget
             
-            SaveValidatorData(vehicle, vehicle.Validators)
+            SaveValidatorData(mainVehicle, mainVehicle.Validators)
             
-            -- Пересоздаем валидаторы
-            RemoveValidatorsFromVehicle(vehicle)
-            for i, validatorData in ipairs(vehicle.Validators) do
-                SpawnValidatorOnVehicle(vehicle, validatorData)
+            RemoveValidatorsFromVehicle(mainVehicle)
+            for i, validatorData in ipairs(mainVehicle.Validators) do
+                SpawnValidatorOnVehicle(mainVehicle, validatorData)
             end
             
             ply:ChatPrint("[SVAS] Валидатор #" .. num .. " обновлен!")
@@ -934,12 +1018,20 @@ if SERVER then
             return false
         end
 
-        local clickedClass = ent:GetClass()
+        -- Определяем основную машину (даже если кликнули по прицепу)
+        local mainVehicle = GetMainVehicle(ent)
+        
+        if not IsValid(mainVehicle) then
+            ply:ChatPrint("[SVAS] Не удалось определить основную машину.")
+            return false
+        end
+
+        local mainClass = mainVehicle:GetClass()
 
         local query =
             "SELECT * FROM " .. TABLE_SERVER ..
-            " WHERE class = " .. sql.SQLStr(clickedClass) ..
-            " OR trailer_class = " .. sql.SQLStr(clickedClass)
+            " WHERE class = " .. sql.SQLStr(mainClass) ..
+            " OR trailer_class = " .. sql.SQLStr(mainClass)
 
         local rows = sql.Query(query)
 
@@ -950,17 +1042,30 @@ if SERVER then
 
         local row = rows[1]
 
-        if not ent.Validators then
-            ent.Validators = {}
+        if not mainVehicle.Validators then
+            mainVehicle.Validators = {}
         end
 
-        local validators = ent.Validators
+        -- Ищем прицеп
+        local trailer = FindTrailer(mainVehicle)
+        if IsValid(trailer) then
+            mainVehicle.SVASTrailer = trailer
+            trailer.SVASMainVehicle = mainVehicle
+            print("[SVAS] Найден прицеп: " .. trailer:GetClass() .. " для машины: " .. mainClass)
+        else
+            mainVehicle.SVASTrailer = nil
+            print("[SVAS] Прицеп не найден для машины: " .. mainClass)
+        end
+
+        local validators = mainVehicle.Validators
 
         net.Start("validator_open_menu")
-            net.WriteEntity(ent)
-            net.WriteString(row.class or clickedClass)
-            net.WriteString(row.name or clickedClass)
+            net.WriteEntity(ent) -- Энтити по которому кликнули
+            net.WriteString(row.class or mainClass)
+            net.WriteString(row.name or mainClass)
             net.WriteString(row.trailer_class or "")
+            net.WriteEntity(mainVehicle.SVASTrailer or NULL)
+            net.WriteEntity(mainVehicle) -- Основная машина
             net.WriteTable(validators)
         net.Send(ply)
 
