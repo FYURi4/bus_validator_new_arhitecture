@@ -1,967 +1,970 @@
-TOOL.Category = "Validator"
+TOOL.Category = "Инструмент Валидатора"
 TOOL.Name = "Validator Tool"
 TOOL.Command = nil
 TOOL.ConfigName = ""
 
+local TABLE_SERVER = "svas_agreelist"
+
 if CLIENT then
-    surface.CreateFont("ValidatorFontClass", {
-        font = "Roboto Bold",
-        size = 60,
-        weight = 1000
-    })
 
-    surface.CreateFont("ValidatorFontName", {
-        font = "Roboto",
-        size = 50,
-        weight = 600
-    })
+    local THEME = {
+        background = Color(30, 30, 35, 240),
+        secondary = Color(45, 45, 50, 255),
+        accent = Color(0, 120, 210, 255),
+        accentLight = Color(0, 150, 255, 255),
+        text = Color(220, 220, 220, 255),
+        success = Color(0, 200, 0, 255),
+        error = Color(200, 0, 0, 255),
+        border = Color(60, 60, 70, 255)
+    }
 
-    surface.CreateFont("ValidatorFontStatus", {
-        font = "Roboto Black",
-        size = 66,
-        weight = 1000
-    })
+    local CURRENT_ENTITY = nil
 
-    surface.CreateFont("ValidatorFontSmall", {
-        font = "Roboto",
-        size = 42,
-        weight = 500
-    })
-end
-
-local LastCheck = 0
-local CheckDelay = 0.5
-
-function TOOL:Think()
-    if not IsValid(self:GetOwner()) then return end
-    local ply = self:GetOwner()
-    local tr = ply:GetEyeTrace()
-
-    if not IsValid(tr.Entity) then
-        if SERVER then
-            net.Start("validator_tool_clear")
-            net.Send(ply)
+    -- Функция для открытия окна редактирования
+    local function OpenEditValidatorFrame(validatorId, validatorData)
+        if IsValid(EditFrame) then
+            EditFrame:Remove()
         end
-        return
+
+        -- Текущие значения для редактирования
+        local currentPos = Vector(validatorData.position.x, validatorData.position.y, validatorData.position.z)
+        local currentAng = Angle(validatorData.angles.p, validatorData.angles.y, validatorData.angles.r)
+
+        EditFrame = vgui.Create("DFrame")
+        EditFrame:SetSize(500, 550)
+        EditFrame:Center()
+        EditFrame:SetTitle("Редактирование")
+        EditFrame:SetDraggable(true)
+        EditFrame:ShowCloseButton(true)
+        EditFrame:MakePopup()
+
+        EditFrame.Paint = function(self, w, h)
+            draw.RoundedBox(8, 0, 0, w, h, THEME.background)
+            surface.SetDrawColor(THEME.border)
+            surface.DrawOutlinedRect(0, 0, w, h)
+        end
+
+        local y = 50
+        local spacing = 45
+
+        -- Информация
+        local info = vgui.Create("DLabel", EditFrame)
+        info:SetPos(15, y)
+        info:SetText("Модель: " .. (validatorData.model or "aqsi_cube"))
+        info:SetTextColor(THEME.text)
+        info:SizeToContents()
+        y = y + 40
+
+        -- Заголовок позиции
+        local posTitle = vgui.Create("DLabel", EditFrame)
+        posTitle:SetPos(15, y)
+        posTitle:SetText("ПОЗИЦИЯ")
+        posTitle:SetTextColor(THEME.accentLight)
+        posTitle:SetFont("DermaDefaultBold")
+        posTitle:SizeToContents()
+        y = y + 25
+
+        -- Позиция X
+        local xLabel = vgui.Create("DLabel", EditFrame)
+        xLabel:SetPos(15, y)
+        xLabel:SetText("X:")
+        xLabel:SetTextColor(THEME.text)
+        xLabel:SizeToContents()
+
+        local xSlider = vgui.Create("DNumSlider", EditFrame)
+        xSlider:SetPos(60, y - 5)
+        xSlider:SetSize(300, 25)
+        xSlider:SetText("")
+        xSlider:SetMin(-165)
+        xSlider:SetMax(165)
+        xSlider:SetDecimals(1)
+        xSlider:SetValue(currentPos.x)
+        xSlider.OnValueChanged = function(slider, val)
+            currentPos.x = math.Round(val)
+        end
+
+        local xWang = vgui.Create("DNumberWang", EditFrame)
+        xWang:SetPos(370, y - 3)
+        xWang:SetSize(110, 22)
+        xWang:SetMin(-165)
+        xWang:SetMax(165)
+        xWang:SetDecimals(1)
+        xWang:SetValue(currentPos.x)
+        xWang.OnValueChanged = function(wang, val)
+            currentPos.x = val
+            xSlider:SetValue(val)
+        end
+
+        y = y + spacing
+
+        -- Позиция Y
+        local yLabel = vgui.Create("DLabel", EditFrame)
+        yLabel:SetPos(15, y)
+        yLabel:SetText("Y:")
+        yLabel:SetTextColor(THEME.text)
+        yLabel:SizeToContents()
+
+        local ySlider = vgui.Create("DNumSlider", EditFrame)
+        ySlider:SetPos(60, y - 5)
+        ySlider:SetSize(300, 25)
+        ySlider:SetText("")
+        ySlider:SetMin(-43)
+        ySlider:SetMax(43)
+        ySlider:SetDecimals(1)
+        ySlider:SetValue(currentPos.y)
+        ySlider.OnValueChanged = function(slider, val)
+            currentPos.y = math.Round(val)
+        end
+
+        local yWang = vgui.Create("DNumberWang", EditFrame)
+        yWang:SetPos(370, y - 3)
+        yWang:SetSize(110, 22)
+        yWang:SetMin(-43)
+        yWang:SetMax(43)
+        yWang:SetDecimals(1)
+        yWang:SetValue(currentPos.y)
+        yWang.OnValueChanged = function(wang, val)
+            currentPos.y = val
+            ySlider:SetValue(val)
+        end
+
+        y = y + spacing
+
+        -- Позиция Z
+        local zLabel = vgui.Create("DLabel", EditFrame)
+        zLabel:SetPos(15, y)
+        zLabel:SetText("Z:")
+        zLabel:SetTextColor(THEME.text)
+        zLabel:SizeToContents()
+
+        local zSlider = vgui.Create("DNumSlider", EditFrame)
+        zSlider:SetPos(60, y - 5)
+        zSlider:SetSize(300, 25)
+        zSlider:SetText("")
+        zSlider:SetMin(-20)
+        zSlider:SetMax(20)
+        zSlider:SetDecimals(1)
+        zSlider:SetValue(currentPos.z)
+        zSlider.OnValueChanged = function(slider, val)
+            currentPos.z = math.Round(val)
+        end
+
+        local zWang = vgui.Create("DNumberWang", EditFrame)
+        zWang:SetPos(370, y - 3)
+        zWang:SetSize(110, 22)
+        zWang:SetMin(-20)
+        zWang:SetMax(20)
+        zWang:SetDecimals(1)
+        zWang:SetValue(currentPos.z)
+        zWang.OnValueChanged = function(wang, val)
+            currentPos.z = val
+            zSlider:SetValue(val)
+        end
+
+        y = y + spacing + 10
+
+        -- Заголовок углов
+        local angTitle = vgui.Create("DLabel", EditFrame)
+        angTitle:SetPos(15, y)
+        angTitle:SetText("УГЛЫ (Градусы)")
+        angTitle:SetTextColor(THEME.accentLight)
+        angTitle:SetFont("DermaDefaultBold")
+        angTitle:SizeToContents()
+        y = y + 25
+
+        -- Угол Pitch
+        local pitchLabel = vgui.Create("DLabel", EditFrame)
+        pitchLabel:SetPos(15, y)
+        pitchLabel:SetText("Pitch:")
+        pitchLabel:SetTextColor(THEME.text)
+        pitchLabel:SizeToContents()
+
+        local pitchSlider = vgui.Create("DNumSlider", EditFrame)
+        pitchSlider:SetPos(80, y - 5)
+        pitchSlider:SetSize(280, 25)
+        pitchSlider:SetText("")
+        pitchSlider:SetMin(-180)
+        pitchSlider:SetMax(180)
+        pitchSlider:SetDecimals(0)
+        pitchSlider:SetValue(currentAng.p)
+        pitchSlider.OnValueChanged = function(slider, val)
+            currentAng.p = math.Round(val)
+        end
+
+        local pitchWang = vgui.Create("DNumberWang", EditFrame)
+        pitchWang:SetPos(370, y - 3)
+        pitchWang:SetSize(110, 22)
+        pitchWang:SetMin(-180)
+        pitchWang:SetMax(180)
+        pitchWang:SetDecimals(0)
+        pitchWang:SetValue(currentAng.p)
+        pitchWang.OnValueChanged = function(wang, val)
+            currentAng.p = val
+            pitchSlider:SetValue(val)
+        end
+
+        y = y + spacing
+
+        -- Угол Yaw
+        local yawLabel = vgui.Create("DLabel", EditFrame)
+        yawLabel:SetPos(15, y)
+        yawLabel:SetText("Yaw:")
+        yawLabel:SetTextColor(THEME.text)
+        yawLabel:SizeToContents()
+
+        local yawSlider = vgui.Create("DNumSlider", EditFrame)
+        yawSlider:SetPos(80, y - 5)
+        yawSlider:SetSize(280, 25)
+        yawSlider:SetText("")
+        yawSlider:SetMin(-180)
+        yawSlider:SetMax(180)
+        yawSlider:SetDecimals(0)
+        yawSlider:SetValue(currentAng.y)
+        yawSlider.OnValueChanged = function(slider, val)
+            currentAng.y = math.Round(val)
+        end
+
+        local yawWang = vgui.Create("DNumberWang", EditFrame)
+        yawWang:SetPos(370, y - 3)
+        yawWang:SetSize(110, 22)
+        yawWang:SetMin(-180)
+        yawWang:SetMax(180)
+        yawWang:SetDecimals(0)
+        yawWang:SetValue(currentAng.y)
+        yawWang.OnValueChanged = function(wang, val)
+            currentAng.y = val
+            yawSlider:SetValue(val)
+        end
+
+        y = y + spacing
+
+        -- Угол Roll
+        local rollLabel = vgui.Create("DLabel", EditFrame)
+        rollLabel:SetPos(15, y)
+        rollLabel:SetText("Roll:")
+        rollLabel:SetTextColor(THEME.text)
+        rollLabel:SizeToContents()
+
+        local rollSlider = vgui.Create("DNumSlider", EditFrame)
+        rollSlider:SetPos(80, y - 5)
+        rollSlider:SetSize(280, 25)
+        rollSlider:SetText("")
+        rollSlider:SetMin(-180)
+        rollSlider:SetMax(180)
+        rollSlider:SetDecimals(0)
+        rollSlider:SetValue(currentAng.r)
+        rollSlider.OnValueChanged = function(slider, val)
+            currentAng.r = math.Round(val)
+        end
+
+        local rollWang = vgui.Create("DNumberWang", EditFrame)
+        rollWang:SetPos(370, y - 3)
+        rollWang:SetSize(110, 22)
+        rollWang:SetMin(-180)
+        rollWang:SetMax(180)
+        rollWang:SetDecimals(0)
+        rollWang:SetValue(currentAng.r)
+        rollWang.OnValueChanged = function(wang, val)
+            currentAng.r = val
+            rollSlider:SetValue(val)
+        end
+
+        y = y + spacing + 20
+
+        -- Кнопка Сохранить
+        local saveBtn = vgui.Create("DButton", EditFrame)
+        saveBtn:SetPos(15, y)
+        saveBtn:SetSize(230, 40)
+        saveBtn:SetText("")
+        saveBtn.Paint = function(self, w, h)
+            if self:IsHovered() then
+                draw.RoundedBox(6, 0, 0, w, h, THEME.accentLight)
+            else
+                draw.RoundedBox(6, 0, 0, w, h, THEME.success)
+            end
+            draw.SimpleText("СОХРАНИТЬ", "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+        saveBtn.DoClick = function()
+            net.Start("svas_update_validator")
+                net.WriteEntity(CURRENT_ENTITY)
+                net.WriteInt(validatorId, 32)
+                net.WriteVector(currentPos)
+                net.WriteAngle(currentAng)
+            net.SendToServer()
+            EditFrame:Remove()
+        end
+
+        -- Кнопка Отмена
+        local cancelBtn = vgui.Create("DButton", EditFrame)
+        cancelBtn:SetPos(255, y)
+        cancelBtn:SetSize(230, 40)
+        cancelBtn:SetText("")
+        cancelBtn.Paint = function(self, w, h)
+            if self:IsHovered() then
+                draw.RoundedBox(6, 0, 0, w, h, Color(255, 80, 80))
+            else
+                draw.RoundedBox(6, 0, 0, w, h, THEME.error)
+            end
+            draw.SimpleText("ОТМЕНА", "DermaDefaultBold", w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+        cancelBtn.DoClick = function()
+            EditFrame:Remove()
+        end
     end
 
-    local ent = tr.Entity
-    if not ent:GetClass() then return end
-    if CurTime() - LastCheck < CheckDelay then return end
-    LastCheck = CurTime()
+    local function CreateValidatorEditor(parent, validators)
 
-    if SERVER then
-        local class = ent:GetClass()
-        local data = sql.QueryRow("SELECT * FROM ulx_validators_vehicles WHERE vehicle_class = " .. sql.SQLStr(class))
-        local allowed = data ~= nil
+        local panel = vgui.Create("DScrollPanel", parent)
+        panel:Dock(FILL)
 
-        net.Start("validator_tool_check_result")
-        net.WriteEntity(ent)
-        net.WriteBool(allowed)
-        if data then
-            net.WriteString(data.vehicle_class or "")
-            net.WriteString(data.vehicle_name or "")
-        else
-            net.WriteString(class or "")
-            net.WriteString("Not found")
+        if not validators or #validators == 0 then
+            local emptyLabel = vgui.Create("DLabel", panel)
+            emptyLabel:SetText("Нет созданных валидаторов")
+            emptyLabel:SetTextColor(THEME.text)
+            emptyLabel:SetFont("DermaDefault")
+            emptyLabel:SetPos(10, 10)
+            emptyLabel:SizeToContents()
+            
+            return panel
         end
-        net.Send(ply)
+
+        local y = 10
+
+        for i, data in ipairs(validators) do
+
+            local block = vgui.Create("DPanel", panel)
+            block:SetPos(10, y)
+            block:SetSize(430, 140)
+
+            block.Paint = function(self, w, h)
+
+                draw.RoundedBox(6, 0, 0, w, h, THEME.secondary)
+
+                draw.SimpleText(
+                    "Валидатор #" .. i,
+                    "DermaDefaultBold",
+                    15,
+                    10,
+                    THEME.accentLight
+                )
+
+                draw.SimpleText(
+                    "Модель: " .. (data.model or "неизвестно"),
+                    "DermaDefault",
+                    15,
+                    35,
+                    THEME.text
+                )
+
+                if data.position then
+                    draw.SimpleText(
+                        "Позиция: " ..
+                        math.Round(data.position.x) .. " " ..
+                        math.Round(data.position.y) .. " " ..
+                        math.Round(data.position.z),
+                        "DermaDefault",
+                        15,
+                        55,
+                        THEME.text
+                    )
+                end
+
+                if data.angles then
+                    draw.SimpleText(
+                        "Угол: " ..
+                        math.Round(data.angles.p) .. " " ..
+                        math.Round(data.angles.y) .. " " ..
+                        math.Round(data.angles.r),
+                        "DermaDefault",
+                        15,
+                        75,
+                        THEME.text
+                    )
+                end
+
+            end
+
+            -- Кнопка редактирования
+            local editBtn = vgui.Create("DButton", block)
+            editBtn:SetPos(15, 95)
+            editBtn:SetSize(195, 28)
+            editBtn:SetText("")
+
+            editBtn.Paint = function(self, w, h)
+                draw.RoundedBox(
+                    4,
+                    0,
+                    0,
+                    w,
+                    h,
+                    self:IsHovered()
+                        and THEME.accentLight
+                        or THEME.accent
+                )
+                draw.SimpleText(
+                    "РЕДАКТИРОВАТЬ #" .. i,
+                    "DermaDefaultBold",
+                    w / 2,
+                    h / 2,
+                    color_white,
+                    TEXT_ALIGN_CENTER,
+                    TEXT_ALIGN_CENTER
+                )
+            end
+
+            editBtn.DoClick = function()
+                net.Start("svas_edit_validator")
+                    net.WriteEntity(CURRENT_ENTITY)
+                    net.WriteInt(i, 32)
+                net.SendToServer()
+            end
+
+            -- Кнопка удаления
+            local removeBtn = vgui.Create("DButton", block)
+            removeBtn:SetPos(220, 95)
+            removeBtn:SetSize(195, 28)
+            removeBtn:SetText("")
+
+            removeBtn.Paint = function(self, w, h)
+                draw.RoundedBox(
+                    4,
+                    0,
+                    0,
+                    w,
+                    h,
+                    self:IsHovered()
+                        and Color(255,50,50)
+                        or THEME.error
+                )
+                draw.SimpleText(
+                    "УДАЛИТЬ #" .. i,
+                    "DermaDefaultBold",
+                    w / 2,
+                    h / 2,
+                    color_white,
+                    TEXT_ALIGN_CENTER,
+                    TEXT_ALIGN_CENTER
+                )
+            end
+
+            removeBtn.DoClick = function()
+                net.Start("svas_remove_validator")
+                    net.WriteEntity(CURRENT_ENTITY)
+                    net.WriteInt(i, 32)
+                net.SendToServer()
+                
+                block:Remove()
+            end
+
+            y = y + 150
+
+        end
+
+        return panel
+
     end
+
+    local function CreateAddValidatorTab(parent)
+
+        local panel = vgui.Create("DPanel", parent)
+        panel:Dock(FILL)
+
+        panel.Paint = function(self, w, h)
+
+            draw.RoundedBox(4, 0, 0, w, h, THEME.secondary)
+
+        end
+
+        local modelLabel = vgui.Create("DLabel", panel)
+        modelLabel:SetPos(20, 20)
+        modelLabel:SetSize(380, 20)
+        modelLabel:SetText("Выберите модель валидатора:")
+        modelLabel:SetTextColor(THEME.text)
+        modelLabel:SetFont("DermaDefault")
+
+        local modelCombo = vgui.Create("DComboBox", panel)
+        modelCombo:SetPos(20, 50)
+        modelCombo:SetSize(380, 30)
+        modelCombo:SetValue("aqsi_cube")
+        modelCombo:AddChoice("aqsi_cube")
+        modelCombo:AddChoice("bm20")
+        modelCombo:SetTextColor(THEME.text)
+
+        modelCombo.Paint = function(self, w, h)
+
+            draw.RoundedBox(4, 0, 0, w, h, THEME.background)
+
+            surface.SetDrawColor(THEME.border)
+            surface.DrawOutlinedRect(0, 0, w, h)
+
+        end
+
+        local add = vgui.Create("DButton", panel)
+        add:SetPos(20, 110)
+        add:SetSize(380, 40)
+        add:SetText("")
+
+        add.Paint = function(self, w, h)
+
+            draw.RoundedBox(
+                4,
+                0,
+                0,
+                w,
+                h,
+                self:IsHovered()
+                    and THEME.accentLight
+                    or THEME.accent
+            )
+
+            draw.SimpleText(
+                "СОЗДАТЬ ВАЛИДАТОР",
+                "DermaDefaultBold",
+                w / 2,
+                h / 2,
+                color_white,
+                TEXT_ALIGN_CENTER,
+                TEXT_ALIGN_CENTER
+            )
+
+        end
+
+        add.DoClick = function()
+            local selectedModel = string.lower(modelCombo:GetValue())
+            if selectedModel == "" then return end
+
+            net.Start("svas_create_validator")
+                net.WriteEntity(CURRENT_ENTITY)
+                net.WriteString(selectedModel)
+            net.SendToServer()
+        end
+
+        return panel
+
+    end
+
+    local function CreateMainFrame(data)
+
+        CURRENT_ENTITY = data.entity
+
+        if IsValid(SVAS_Frame) then
+            SVAS_Frame:Remove()
+        end
+
+        SVAS_Frame = vgui.Create("DFrame")
+        SVAS_Frame:SetSize(500, 550)
+        SVAS_Frame:Center()
+        SVAS_Frame:SetTitle("")
+        SVAS_Frame:ShowCloseButton(false)
+        SVAS_Frame:MakePopup()
+
+        SVAS_Frame.Paint = function(self, w, h)
+
+            draw.RoundedBox(8, 0, 0, w, h, THEME.background)
+
+            draw.RoundedBox(8, 0, 0, w, 35, THEME.secondary)
+
+            draw.SimpleText(
+                "SVAS VALIDATOR MANAGER",
+                "DermaDefaultBold",
+                15,
+                10,
+                THEME.accentLight
+            )
+
+            surface.SetDrawColor(THEME.border)
+            surface.DrawOutlinedRect(0, 0, w, h)
+
+        end
+
+        local close = vgui.Create("DButton", SVAS_Frame)
+        close:SetSize(30, 25)
+        close:SetPos(460, 5)
+        close:SetText("")
+
+        close.Paint = function(self, w, h)
+
+            draw.RoundedBox(
+                4,
+                0,
+                0,
+                w,
+                h,
+                self:IsHovered()
+                    and THEME.error
+                    or Color(0,0,0,0)
+            )
+
+            draw.SimpleText(
+                "X",
+                "DermaDefaultBold",
+                w / 2,
+                h / 2,
+                color_white,
+                TEXT_ALIGN_CENTER,
+                TEXT_ALIGN_CENTER
+            )
+
+        end
+
+        close.DoClick = function()
+
+            SVAS_Frame:Remove()
+
+        end
+
+        local info = vgui.Create("DPanel", SVAS_Frame)
+        info:SetPos(15, 50)
+        info:SetSize(470, 100)
+
+        info.Paint = function(self, w, h)
+
+            draw.RoundedBox(6, 0, 0, w, h, THEME.secondary)
+
+            draw.SimpleText(
+                "Транспорт: " .. data.vehicleClass,
+                "DermaDefaultBold",
+                15,
+                20,
+                THEME.text
+            )
+
+            draw.SimpleText(
+                "Название: " .. data.vehicleName,
+                "DermaDefault",
+                15,
+                45,
+                THEME.text
+            )
+
+            draw.SimpleText(
+                "Трейлер: " ..
+                (
+                    data.trailerClass ~= ""
+                    and data.trailerClass
+                    or "отсутствует"
+                ),
+                "DermaDefault",
+                15,
+                70,
+                THEME.text
+            )
+
+        end
+
+        local tabs = vgui.Create("DPropertySheet", SVAS_Frame)
+        tabs:SetPos(15, 165)
+        tabs:SetSize(470, 365)
+
+        local validators = CreateValidatorEditor(tabs, data.validators)
+        local create = CreateAddValidatorTab(tabs)
+
+        local settings = vgui.Create("DPanel", tabs)
+        settings:Dock(FILL)
+
+        settings.Paint = function(self, w, h)
+
+            draw.RoundedBox(4,0,0,w,h,THEME.secondary)
+
+            draw.SimpleText(
+                "Настройки транспорта",
+                "DermaDefaultBold",
+                w/2,
+                h/2,
+                THEME.text,
+                TEXT_ALIGN_CENTER,
+                TEXT_ALIGN_CENTER
+            )
+
+        end
+
+        tabs:AddSheet(
+            "Валидаторы",
+            validators,
+            "icon16/group.png"
+        )
+
+        tabs:AddSheet(
+            "Добавить",
+            create,
+            "icon16/add.png"
+        )
+
+        tabs:AddSheet(
+            "Настройки",
+            settings,
+            "icon16/cog.png"
+        )
+
+    end
+
+    net.Receive("validator_open_menu", function()
+
+        local entity = net.ReadEntity()
+        local vehicleClass = net.ReadString()
+        local vehicleName = net.ReadString()
+        local trailerClass = net.ReadString()
+        local validators = net.ReadTable()
+
+        CreateMainFrame({
+            entity = entity,
+            vehicleClass = vehicleClass,
+            vehicleName = vehicleName,
+            trailerClass = trailerClass,
+            validators = validators
+        })
+
+    end)
+
+    net.Receive("svas_open_edit_menu", function()
+        local entity = net.ReadEntity()
+        local validatorId = net.ReadInt(32)
+        local validatorData = net.ReadTable()
+
+        CURRENT_ENTITY = entity
+        OpenEditValidatorFrame(validatorId, validatorData)
+    end)
+
 end
 
 if SERVER then
-    util.AddNetworkString("validator_tool_check_result")
-    util.AddNetworkString("validator_tool_clear")
-    util.AddNetworkString("validator_tool_request_gui")
-    util.AddNetworkString("validator_tool_open_gui")
-    util.AddNetworkString("validator_tool_install")
-    util.AddNetworkString("validator_tool_remove")
-    util.AddNetworkString("validator_tool_get_templates")
-    util.AddNetworkString("validator_tool_get_vehicle_info")
-    util.AddNetworkString("validator_tool_apply_template")
-    
-    net.Receive("validator_tool_request_gui", function(len, ply)
-        local ent = net.ReadEntity()
-        if not IsValid(ent) then
-            ply:ChatPrint("[Validator] Invalid target.")
-            return
-        end
 
-        local class = ent:GetClass()
-        local data = sql.QueryRow("SELECT * FROM ulx_validators_vehicles WHERE vehicle_class = " .. sql.SQLStr(class))
-        local allowed = data ~= nil
+    util.AddNetworkString("validator_open_menu")
+    util.AddNetworkString("svas_create_validator")
+    util.AddNetworkString("svas_remove_validator")
+    util.AddNetworkString("svas_edit_validator")
+    util.AddNetworkString("svas_update_validator")
+    util.AddNetworkString("svas_open_edit_menu")
 
-        if not allowed then
-            ply:ChatPrint("[Validator] Vehicle not allowed for validators.")
-            return
-        end
+    local function SaveValidatorData(ent, data)
+        ent:SetNW2String("SVAS_Validators", util.TableToJSON(data))
+    end
 
-        ent._Validators = ent._Validators or {}
-        local installed_count = #ent._Validators
-        local max_count = 6
-
-        net.Start("validator_tool_open_gui")
-            net.WriteEntity(ent)
-            net.WriteString(class or "")
-            net.WriteString(data.vehicle_name or "")
-            net.WriteInt(installed_count, 16)
-            net.WriteInt(max_count, 16)
-        net.Send(ply)
-    end)
-
-    net.Receive("validator_tool_install", function(len, ply)
-        local ent = net.ReadEntity()
-        local validatorName = net.ReadString()
-        local validatorModel = net.ReadString()
-
-        if not IsValid(ent) then
-            ply:ChatPrint("[Validator] Invalid target.")
-            return
-        end
-
-        local class = ent:GetClass()
-        local data = sql.QueryRow("SELECT * FROM ulx_validators_vehicles WHERE vehicle_class = " .. sql.SQLStr(class))
-        if not data then
-            ply:ChatPrint("[Validator] Class not allowed.")
-            return
-        end
-
-        ent._Validators = ent._Validators or {}
-        if #ent._Validators >= 6 then
-            ply:ChatPrint("[Validator] Maximum validators reached.")
-            return
-        end
-
-        table.insert(ent._Validators, { name = validatorName or "Unknown", model = validatorModel or "" })
-
-        ply:ChatPrint("[Validator] Validator installed: " .. (validatorName or "Unknown"))
-
-        net.Start("validator_tool_open_gui")
-            net.WriteEntity(ent)
-            net.WriteString(class or "")
-            net.WriteString(data.vehicle_name or "")
-            net.WriteInt(#ent._Validators, 16)
-            net.WriteInt(6, 16)
-        net.Send(ply)
-    end)
-
-    net.Receive("validator_tool_remove", function(len, ply)
-        local ent = net.ReadEntity()
-        local index = net.ReadInt(16)
-
-        if not IsValid(ent) then
-            ply:ChatPrint("[Validator] Invalid target.")
-            return
-        end
-
-        ent._Validators = ent._Validators or {}
-        if not ent._Validators[index] then
-            ply:ChatPrint("[Validator] Validator not found.")
-            return
-        end
-
-        table.remove(ent._Validators, index)
-        ply:ChatPrint("[Validator] Validator removed.")
-
-        local class = ent:GetClass()
-        local data = sql.QueryRow("SELECT * FROM ulx_validators_vehicles WHERE vehicle_class = " .. sql.SQLStr(class))
-        net.Start("validator_tool_open_gui")
-            net.WriteEntity(ent)
-            net.WriteString(class or "")
-            net.WriteString((data and data.vehicle_name) or "")
-            net.WriteInt(#ent._Validators, 16)
-            net.WriteInt(6, 16)
-        net.Send(ply)
-    end)
-
-    net.Receive("validator_tool_get_templates", function(len, ply)
-        local templates = sql.Query("SELECT * FROM ulx_shablon_valid_sv") or {}
-        net.Start("validator_tool_get_templates")
-        net.WriteTable(templates)
-        net.Send(ply)
-    end)
-
-    net.Receive("validator_tool_get_vehicle_info", function(len, ply)
-        local class = net.ReadString()
-        local data = sql.QueryRow("SELECT * FROM ulx_validators_vehicles WHERE vehicle_class = " .. sql.SQLStr(class)) or {}
-        net.Start("validator_tool_get_vehicle_info")
-        net.WriteTable(data)
-        net.Send(ply)
-    end)
-
-    net.Receive("validator_tool_apply_template", function(len, ply)
-        local ent = net.ReadEntity()
-        local templateName = net.ReadString()
+    local function GetMaxValidators(vehicleClass)
+        local query = "SELECT value_valid FROM " .. TABLE_SERVER .. " WHERE class = " .. sql.SQLStr(vehicleClass)
+        local result = sql.Query(query)
         
-        if not IsValid(ent) then
-            ply:ChatPrint("[Validator] Invalid target.")
-            return
+        if result and result[1] and result[1].value_valid then
+            return tonumber(result[1].value_valid) or 5
         end
-
-        local template = sql.QueryRow("SELECT * FROM ulx_shablon_valid_sv WHERE name_shablon_valid = " .. sql.SQLStr(templateName))
         
-        if not template then
-            ply:ChatPrint("[Validator] Template not found: " .. templateName)
-            return
+        return 5
+    end
+
+    local function SpawnValidatorOnVehicle(vehicle, validatorData)
+        local entityClass = string.lower(validatorData.model) == "bm20" and "bm20" or "aqsi_cube"
+        
+        local worldPos = vehicle:LocalToWorld(validatorData.position)
+        local worldAng = vehicle:LocalToWorldAngles(validatorData.angles)
+        
+        local validatorEnt = ents.Create(entityClass)
+        if not IsValid(validatorEnt) then 
+            print("[SVAS] Ошибка: не удалось создать энтити " .. entityClass)
+            return nil
         end
+        
+        validatorEnt:SetPos(worldPos)
+        validatorEnt:SetAngles(worldAng)
+        validatorEnt:Spawn()
+        validatorEnt:SetParent(vehicle)
+        validatorEnt:SetMoveType(MOVETYPE_NONE)
+        validatorEnt:SetSolid(SOLID_NONE)
+        
+        validatorEnt.ValidatorData = {
+            model = validatorData.model,
+            position = validatorData.position,
+            angles = validatorData.angles,
+            parentVehicle = vehicle
+        }
+        
+        return validatorEnt
+    end
 
-        if ent:GetClass() ~= template.class_ent then
-            ply:ChatPrint("[Validator] Template not compatible with this vehicle.")
-            return
-        end
-
-        ent._Validators = ent._Validators or {}
-        ent._Validators = {}
-
-        local appliedCount = 0
-        for i = 1, 6 do
-            local pos_x = template["val"..i.."_pos_x"]
-            local pos_y = template["val"..i.."_pos_y"]
-            local pos_z = template["val"..i.."_pos_z"]
-            
-            if pos_x ~= nil and pos_y ~= nil and pos_z ~= nil then
-                table.insert(ent._Validators, {
-                    name = template.name_shablon_valid .. " Val" .. i,
-                    model = template.validator_model_path or "models/props_lab/reciever01b.mdl",
-                    pos = Vector(
-                        tonumber(pos_x) or 0,
-                        tonumber(pos_y) or 0, 
-                        tonumber(pos_z) or 0
-                    ),
-                    ang = Angle(
-                        tonumber(template["val"..i.."_ang_p"]) or 0,
-                        tonumber(template["val"..i.."_ang_y"]) or 0,
-                        tonumber(template["val"..i.."_ang_r"]) or 0
-                    )
-                })
-                appliedCount = appliedCount + 1
+    local function RemoveValidatorsFromVehicle(vehicle)
+        for _, child in ipairs(vehicle:GetChildren()) do
+            if IsValid(child) then
+                local class = child:GetClass()
+                if class == "aqsi_cube" or class == "bm20" then
+                    child:Remove()
+                end
             end
         end
+    end
 
-        ply:ChatPrint("[Validator] Template '" .. templateName .. "' applied. Installed " .. appliedCount .. " validators.")
-
-        local class = ent:GetClass()
-        local data = sql.QueryRow("SELECT * FROM ulx_validators_vehicles WHERE vehicle_class = " .. sql.SQLStr(class))
-        net.Start("validator_tool_open_gui")
-            net.WriteEntity(ent)
-            net.WriteString(class or "")
-            net.WriteString((data and data.vehicle_name) or "")
-            net.WriteInt(#ent._Validators, 16)
-            net.WriteInt(6, 16)
-        net.Send(ply)
-    end)
-    
-else
-    net.Receive("validator_tool_check_result", function()
-        local ent = net.ReadEntity()
-        local allowed = net.ReadBool()
-        local vehicleClass = net.ReadString()
-        local vehicleName = net.ReadString()
-
-        if not IsValid(ent) then return end
-
-        LocalPlayer().ValidatorTarget = ent
-        LocalPlayer().ValidatorAllowed = allowed
-        LocalPlayer().ValidatorClass = vehicleClass
-        LocalPlayer().ValidatorName = vehicleName
-        LocalPlayer().ValidatorAlpha = 255
-        LocalPlayer().ValidatorLastSeen = CurTime()
-    end)
-
-    net.Receive("validator_tool_clear", function()
-        LocalPlayer().ValidatorTarget = nil
-        LocalPlayer().ValidatorAllowed = nil
-        LocalPlayer().ValidatorClass = nil
-        LocalPlayer().ValidatorName = nil
-        LocalPlayer().ValidatorLastSeen = CurTime()
-    end)
-end
-
-if CLIENT then
-    hook.Add("PostDrawTranslucentRenderables", "ValidatorTool3D2D", function()
-        local ply = LocalPlayer()
-        if not IsValid(ply) or not IsValid(ply:GetActiveWeapon()) then return end
-        local wep = ply:GetActiveWeapon()
-        if not wep:IsValid() or wep:GetClass() ~= "gmod_tool" or wep:GetMode() ~= "validator_tool" then return end
-
-        local ent = ply.ValidatorTarget
-        local allowed = ply.ValidatorAllowed
-        local class = ply.ValidatorClass
-        local name = ply.ValidatorName
-
-        if not IsValid(ent) or allowed == nil then return end
-
-        ply.ValidatorAlpha = Lerp(FrameTime() * 5, ply.ValidatorAlpha or 0, (CurTime() - (ply.ValidatorLastSeen or 0) > 1 and 0) or 255)
-        local alpha = math.Clamp(ply.ValidatorAlpha, 0, 255)
-        if alpha < 5 then return end
-
-        local classText = class or "unknown_class"
-        local subText = allowed and "ALLOWED FOR VALIDATORS" or "NOT ALLOWED FOR VALIDATORS"
-        local nameText = (allowed and name and name ~= "" and name ~= "Not found") and name or nil
-        local countText = allowed and "Validators: 0 / 6" or nil
-
-        local maxW = 0
-        local function GetWidth(font, text)
-            surface.SetFont(font)
-            return surface.GetTextSize(text)
-        end
-
-        maxW = math.max(maxW, GetWidth("ValidatorFontClass", classText))
-        if nameText then maxW = math.max(maxW, GetWidth("ValidatorFontName", nameText)) end
-        if countText then maxW = math.max(maxW, GetWidth("ValidatorFontSmall", countText)) end
-        maxW = math.max(maxW, GetWidth("ValidatorFontStatus", subText))
-
-        local padding = 180
-        local bgW = maxW + padding
-        local bgH = allowed and 300 or 200
-
-        local pos = ent:LocalToWorld(ent:OBBCenter() + Vector(0, 0, 40))
-        local ang = Angle(0, ply:EyeAngles().y - 90, 90)
-
-        local bgColor = Color(0, 0, 0, 170 * (alpha / 255))
-        local borderColor = allowed and Color(0, 255, 0, 220 * (alpha / 255)) or Color(255, 0, 0, 220 * (alpha / 255))
-        local subColor = allowed and Color(0, 255, 0, alpha) or Color(255, 0, 0, alpha)
-        local textColor = Color(255, 255, 255, alpha)
-
-        cam.IgnoreZ(true)
-
-        cam.Start3D2D(pos, ang, 0.09)
-            surface.SetDrawColor(bgColor)
-            surface.DrawRect(-bgW / 2, -bgH / 2, bgW, bgH)
-
-            surface.SetDrawColor(borderColor)
-            surface.DrawOutlinedRect(-bgW / 2, -bgH / 2, bgW, bgH, 4)
-
-            local y = -60
-            draw.SimpleText(classText, "ValidatorFontClass", 0, y, textColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-
-            if allowed and nameText then
-                y = y + 55
-                draw.SimpleText(nameText, "ValidatorFontName", 0, y, Color(220, 220, 220, alpha), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    function addorrm(com, model, imen, ent, num, updateData)
+        if com == "add" then
+            if IsValid(ent) then
+                if not ent.Validators then
+                    ent.Validators = {}
+                end
+                
+                local maxValidators = GetMaxValidators(ent:GetClass())
+                
+                if #ent.Validators < maxValidators then
+                    local localPos = Vector(0, 0, 0)
+                    local localAng = Angle(0, 0, 0)
+                    
+                    local base = {
+                        ["model"] = string.lower(model),
+                        ["position"] = localPos,
+                        ["angles"] = localAng,
+                        ["immedenabled"] = imen
+                    }
+                    table.insert(ent.Validators, base)
+                    SaveValidatorData(ent, ent.Validators)
+                    
+                    SpawnValidatorOnVehicle(ent, base)
+                    
+                    return true
+                else
+                    print("[SVAS] Достигнут максимум валидаторов для " .. ent:GetClass())
+                    return false
+                end
+            else
+                return false
             end
-
-            if allowed and countText then
-                y = y + 45
-                draw.SimpleText(countText, "ValidatorFontSmall", 0, y, Color(240, 240, 240, alpha), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        elseif com == "rm" then
+            if IsValid(ent) and ent.Validators then
+                if num and ent.Validators[num] then
+                    table.remove(ent.Validators, num)
+                    SaveValidatorData(ent, ent.Validators)
+                    
+                    RemoveValidatorsFromVehicle(ent)
+                    
+                    for i, validatorData in ipairs(ent.Validators) do
+                        SpawnValidatorOnVehicle(ent, validatorData)
+                    end
+                    
+                    return true
+                end
             end
-
-            y = (allowed and y + 55 or y + 110)
-            draw.SimpleText(subText, "ValidatorFontStatus", 0, y, subColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-        cam.End3D2D()
-
-        cam.IgnoreZ(false)
-    end)
-end
-
-function TOOL:LeftClick(trace)
-    local ply = self:GetOwner()
-    if not IsValid(ply) then return false end
-
-    if CLIENT then
-        local ent = LocalPlayer().ValidatorTarget
-        if not IsValid(ent) then
-            chat.AddText(Color(255,100,100), "[Validator] ", Color(200,200,200), "No target selected.")
-            return true
-        end
-
-        if LocalPlayer().ValidatorAllowed == false then
-            Derma_Message("Vehicle not allowed for validators.", "Validator", "OK")
-            return true
-        end
-
-        net.Start("validator_tool_request_gui")
-        net.WriteEntity(ent)
-        net.SendToServer()
-        return true
-    end
-
-    return true
-end
-
-if CLIENT then
-    local blur = Material("pp/blurscreen")
-
-    local function DrawBlur(panel, amount)
-        local x, y = panel:LocalToScreen(0, 0)
-        local scrW, scrH = ScrW(), ScrH()
-
-        surface.SetDrawColor(255, 255, 255)
-        surface.SetMaterial(blur)
-
-        for i = 1, 3 do
-            blur:SetFloat("$blur", (i / 3) * (amount or 6))
-            blur:Recompute()
-            render.UpdateScreenEffectTexture()
-            surface.DrawTexturedRect(-x, -y, scrW, scrH)
-        end
-    end
-
-    local CurrentTemplates = {}
-    local CurrentVehicleInfo = {}
-    local ActiveTimers = {}
-
-    local function RequestTemplates()
-        net.Start("validator_tool_get_templates")
-        net.SendToServer()
-    end
-
-    local function RequestVehicleInfo(class)
-        net.Start("validator_tool_get_vehicle_info")
-        net.WriteString(class)
-        net.SendToServer()
-    end
-
-    local function StopAllTimers()
-        for timerName, _ in pairs(ActiveTimers) do
-            timer.Remove(timerName)
-        end
-        ActiveTimers = {}
-    end
-
-    local function HasValidatorCoordinates(template, index)
-        local pos_x = template["val"..index.."_pos_x"]
-        local pos_y = template["val"..index.."_pos_y"]
-        local pos_z = template["val"..index.."_pos_z"]
-        
-        if pos_x == nil or pos_y == nil or pos_z == nil then
             return false
         end
         
-        local num_x = tonumber(pos_x)
-        local num_y = tonumber(pos_y)
-        local num_z = tonumber(pos_z)
-        
-        return num_x ~= nil and num_y ~= nil and num_z ~= nil
+        return false
     end
 
-    local function CountValidatorsInTemplate(template)
-        local count = 0
-        for i = 1, 6 do
-            if HasValidatorCoordinates(template, i) then
-                count = count + 1
-            end
+    net.Receive("svas_create_validator", function(_, ply)
+        local vehicle = net.ReadEntity()
+        local validatorType = net.ReadString()
+
+        if not IsValid(vehicle) then return end
+
+        local success = addorrm("add", validatorType, false, vehicle, nil)
+        
+        if success then
+            ply:ChatPrint("[SVAS] Валидатор создан.")
+        else
+            ply:ChatPrint("[SVAS] Не удалось создать валидатор.")
         end
-        return count
+    end)
+
+    net.Receive("svas_remove_validator", function(_, ply)
+        local vehicle = net.ReadEntity()
+        local num = net.ReadInt(32)
+
+        if not IsValid(vehicle) then return end
+
+        local success = addorrm("rm", nil, nil, vehicle, num)
+        
+        if success then
+            ply:ChatPrint("[SVAS] Валидатор #" .. num .. " удален.")
+        else
+            ply:ChatPrint("[SVAS] Не удалось удалить валидатор.")
+        end
+    end)
+
+    net.Receive("svas_edit_validator", function(_, ply)
+        local vehicle = net.ReadEntity()
+        local num = net.ReadInt(32)
+
+        if not IsValid(vehicle) then return end
+
+        if not vehicle.Validators then
+            vehicle.Validators = {}
+        end
+
+        if num and vehicle.Validators[num] then
+            net.Start("svas_open_edit_menu")
+                net.WriteEntity(vehicle)
+                net.WriteInt(num, 32)
+                net.WriteTable(vehicle.Validators[num])
+            net.Send(ply)
+        else
+            ply:ChatPrint("[SVAS] Валидатор #" .. num .. " не найден!")
+        end
+    end)
+
+    net.Receive("svas_update_validator", function(_, ply)
+        local vehicle = net.ReadEntity()
+        local num = net.ReadInt(32)
+        local newPos = net.ReadVector()
+        local newAng = net.ReadAngle()
+
+        if not IsValid(vehicle) then return end
+
+        if not vehicle.Validators then
+            vehicle.Validators = {}
+        end
+
+        if num and vehicle.Validators[num] then
+            -- Заменяем старые координаты новыми
+            vehicle.Validators[num].position = newPos
+            vehicle.Validators[num].angles = newAng
+            
+            SaveValidatorData(vehicle, vehicle.Validators)
+            
+            -- Пересоздаем валидаторы
+            RemoveValidatorsFromVehicle(vehicle)
+            for i, validatorData in ipairs(vehicle.Validators) do
+                SpawnValidatorOnVehicle(vehicle, validatorData)
+            end
+            
+            ply:ChatPrint("[SVAS] Валидатор #" .. num .. " обновлен!")
+        else
+            ply:ChatPrint("[SVAS] Валидатор #" .. num .. " не найден!")
+        end
+    end)
+
+    function TOOL:LeftClick(trace)
+        local ply = self:GetOwner()
+        local ent = trace.Entity
+
+        if not IsValid(ent) then
+            return false
+        end
+
+        local clickedClass = ent:GetClass()
+
+        local query =
+            "SELECT * FROM " .. TABLE_SERVER ..
+            " WHERE class = " .. sql.SQLStr(clickedClass) ..
+            " OR trailer_class = " .. sql.SQLStr(clickedClass)
+
+        local rows = sql.Query(query)
+
+        if not rows or not rows[1] then
+            ply:ChatPrint("[SVAS] Этот транспорт не разрешен.")
+            return true
+        end
+
+        local row = rows[1]
+
+        if not ent.Validators then
+            ent.Validators = {}
+        end
+
+        local validators = ent.Validators
+
+        net.Start("validator_open_menu")
+            net.WriteEntity(ent)
+            net.WriteString(row.class or clickedClass)
+            net.WriteString(row.name or clickedClass)
+            net.WriteString(row.trailer_class or "")
+            net.WriteTable(validators)
+        net.Send(ply)
+
+        return true
     end
 
-    net.Receive("validator_tool_get_templates", function()
-        CurrentTemplates = net.ReadTable() or {}
-    end)
-
-    net.Receive("validator_tool_get_vehicle_info", function()
-        CurrentVehicleInfo = net.ReadTable() or {}
-    end)
-
-    local function OpenValidatorMenu(class, vehicle_name, ent, installed_count, max_count)
-        if not IsValid(ent) then return end
-
-        if IsValid(ValidatorMenu) then
-            ValidatorMenu:Remove()
-            StopAllTimers()
-        end
-
-        local w, h = 970, 750
-        local frame = vgui.Create("DFrame")
-        ValidatorMenu = frame
-        frame:SetSize(w, h)
-        frame:Center()
-        frame:MakePopup()
-        frame:SetDraggable(false)
-        frame:ShowCloseButton(false)
-        frame:SetTitle("")
-        
-        local contentPanel
-        
-        frame.Paint = function(s, ww, hh)
-            DrawBlur(s, 6)
-            surface.SetDrawColor(15, 15, 15, 230)
-            surface.DrawRect(0, 0, ww, hh)
-            surface.SetDrawColor(0, 180, 255, 4)
-            surface.DrawOutlinedRect(0, 0, ww, hh, 2)
-        end
-
-        local header = vgui.Create("DPanel", frame)
-        header:Dock(TOP)
-        header:SetTall(70)
-        header.Paint = function(s, ww, hh)
-            surface.SetDrawColor(25, 25, 25, 240)
-            surface.DrawRect(0, 0, ww, hh)
-            draw.SimpleText("VALIDATOR MANAGER", "Trebuchet24", ww / 2, hh / 2, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-        end
-
-        local infoPanel = vgui.Create("DPanel", frame)
-        infoPanel:Dock(TOP)
-        infoPanel:SetTall(50)
-        infoPanel:DockMargin(10, 5, 10, 5)
-        infoPanel.Paint = function(s, ww, hh)
-            surface.SetDrawColor(35, 35, 35, 220)
-            surface.DrawRect(0, 0, ww, hh)
-            surface.SetDrawColor(0, 150, 255, 40)
-            surface.DrawOutlinedRect(0, 0, ww, hh, 1)
-            
-            draw.SimpleText("Class: " .. (class or "N/A"), "DermaDefault", 10, hh / 2 - 8, Color(255,255,255), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-            draw.SimpleText("Vehicle: " .. (vehicle_name or "Unknown"), "DermaDefault", 10, hh / 2 + 8, Color(200,200,200), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-            draw.SimpleText("Validators: " .. (installed_count or 0) .. " / " .. (max_count or 6), "DermaDefault", ww - 10, hh / 2, Color(180, 180, 180), TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-        end
-
-        local tabPanel = vgui.Create("DPanel", frame)
-        tabPanel:Dock(TOP)
-        tabPanel:SetTall(45)
-        tabPanel:DockMargin(10, 0, 10, 5)
-        tabPanel.Paint = function(s, ww, hh)
-            surface.SetDrawColor(30, 30, 30, 200)
-            surface.DrawRect(0, 0, ww, hh)
-        end
-
-        local tabs = {
-            {"INSTALLED VALIDATORS", true},
-            {"TEMPLATES", false},
-            {"NEW TEMPLATE", false},
-            {"SETTINGS", false},
-            {"VEHICLE INFO", false}
-        }
-
-        local tabButtons = {}
-        local activeTab = 1
-
-        local tabWidths = {200, 130, 140, 110, 140}
-
-        contentPanel = vgui.Create("DPanel", frame)
-        contentPanel:Dock(FILL)
-        contentPanel:DockMargin(10, 0, 10, 10)
-        contentPanel.Paint = function(s, ww, hh)
-            surface.SetDrawColor(25, 25, 25, 200)
-            surface.DrawRect(0, 0, ww, hh)
-        end
-
-        local function UpdateContent()
-            if not IsValid(contentPanel) then return end
-            
-            contentPanel:Clear()
-            
-            if activeTab == 1 then
-                local listHeader = vgui.Create("DLabel", contentPanel)
-                listHeader:SetText("Installed Validators:")
-                listHeader:SetFont("DermaDefaultBold")
-                listHeader:SetTextColor(Color(255, 255, 255))
-                listHeader:Dock(TOP)
-                listHeader:SetTall(30)
-                listHeader:DockMargin(10, 10, 10, 5)
-
-                local installedScroll = vgui.Create("DScrollPanel", contentPanel)
-                installedScroll:Dock(FILL)
-                installedScroll:DockMargin(10, 0, 10, 10)
-
-                local function RefreshInstalledList()
-                    if not IsValid(installedScroll) then return end
-                    
-                    installedScroll:Clear()
-                    
-                    local vals = ent._Validators or {}
-                    if #vals == 0 then
-                        local emptyLabel = vgui.Create("DLabel", installedScroll)
-                        emptyLabel:SetText("No validators installed")
-                        emptyLabel:SetFont("DermaDefault")
-                        emptyLabel:SetTextColor(Color(150, 150, 150))
-                        emptyLabel:SetContentAlignment(5)
-                        emptyLabel:Dock(TOP)
-                        emptyLabel:SetTall(60)
-                        emptyLabel:DockMargin(0, 10, 0, 0)
-                        return
-                    end
-
-                    for i, validator in ipairs(vals) do
-                        local validatorPanel = vgui.Create("DPanel", installedScroll)
-                        validatorPanel:Dock(TOP)
-                        validatorPanel:SetTall(80)
-                        validatorPanel:DockMargin(0, 0, 0, 5)
-                        validatorPanel.Paint = function(s, ww, hh)
-                            surface.SetDrawColor(40, 40, 40, 220)
-                            surface.DrawRect(0, 0, ww, hh)
-                            surface.SetDrawColor(0, 120, 255, 60)
-                            surface.DrawOutlinedRect(0, 0, ww, hh, 1)
-                        end
-
-                        local modelPanel = vgui.Create("DModelPanel", validatorPanel)
-                        modelPanel:SetSize(70, 70)
-                        modelPanel:SetPos(5, 5)
-                        modelPanel:SetModel(validator.model or "models/props_lab/reciever01b.mdl")
-                        function modelPanel:LayoutEntity() return end
-
-                        local nameLabel = vgui.Create("DLabel", validatorPanel)
-                        nameLabel:SetText(validator.name or "Unknown Validator")
-                        nameLabel:SetFont("DermaDefaultBold")
-                        nameLabel:SetTextColor(Color(255, 255, 255))
-                        nameLabel:SetPos(85, 15)
-                        nameLabel:SizeToContents()
-
-                        local modelLabel = vgui.Create("DLabel", validatorPanel)
-                        modelLabel:SetText("Model: " .. (validator.model or "Unknown"))
-                        modelLabel:SetFont("DermaDefault")
-                        modelLabel:SetTextColor(Color(180, 180, 180))
-                        modelLabel:SetPos(85, 35)
-                        modelLabel:SizeToContents()
-
-                        local removeBtn = vgui.Create("DButton", validatorPanel)
-                        removeBtn:SetText("Remove")
-                        removeBtn:SetFont("DermaDefault")
-                        removeBtn:SetSize(100, 30)
-                        removeBtn:SetPos(validatorPanel:GetWide() - 110, 25)
-                        removeBtn.Paint = function(s, ww, hh)
-                            surface.SetDrawColor(200, 60, 60, 180)
-                            surface.DrawRect(0, 0, ww, hh)
-                        end
-                        removeBtn.DoClick = function()
-                            Derma_Query("Remove validator '" .. (validator.name or "Unknown") .. "'?", "Confirmation",
-                                "Yes", function()
-                                    net.Start("validator_tool_remove")
-                                    net.WriteEntity(ent)
-                                    net.WriteInt(i, 16)
-                                    net.SendToServer()
-                                end,
-                                "No", function() end
-                            )
-                        end
-                    end
-                end
-                RefreshInstalledList()
-
-            elseif activeTab == 2 then
-                RequestTemplates()
-                
-                local listHeader = vgui.Create("DLabel", contentPanel)
-                listHeader:SetText("Available Templates:")
-                listHeader:SetFont("DermaDefaultBold")
-                listHeader:SetTextColor(Color(255, 255, 255))
-                listHeader:Dock(TOP)
-                listHeader:SetTall(30)
-                listHeader:DockMargin(10, 10, 10, 5)
-
-                local templatesScroll = vgui.Create("DScrollPanel", contentPanel)
-                templatesScroll:Dock(FILL)
-                templatesScroll:DockMargin(10, 0, 10, 10)
-
-                local function RefreshTemplatesList()
-                    if not IsValid(templatesScroll) then return end
-                    
-                    templatesScroll:Clear()
-                    
-                    if #CurrentTemplates == 0 then
-                        local emptyLabel = vgui.Create("DLabel", templatesScroll)
-                        emptyLabel:SetText("No templates available")
-                        emptyLabel:SetFont("DermaDefault")
-                        emptyLabel:SetTextColor(Color(150, 150, 150))
-                        emptyLabel:SetContentAlignment(5)
-                        emptyLabel:Dock(TOP)
-                        emptyLabel:SetTall(60)
-                        emptyLabel:DockMargin(0, 10, 0, 0)
-                        return
-                    end
-
-                    for i, template in ipairs(CurrentTemplates) do
-                        local templatePanel = vgui.Create("DPanel", templatesScroll)
-                        templatePanel:Dock(TOP)
-                        templatePanel:SetTall(140)
-                        templatePanel:DockMargin(0, 0, 0, 5)
-                        templatePanel.Paint = function(s, ww, hh)
-                            surface.SetDrawColor(40, 40, 40, 220)
-                            surface.DrawRect(0, 0, ww, hh)
-                            surface.SetDrawColor(0, 150, 255, 60)
-                            surface.DrawOutlinedRect(0, 0, ww, hh, 1)
-                        end
-
-                        local nameLabel = vgui.Create("DLabel", templatePanel)
-                        nameLabel:SetText(template.name_shablon_valid or "Unnamed")
-                        nameLabel:SetFont("DermaDefaultBold")
-                        nameLabel:SetTextColor(Color(255, 255, 255))
-                        nameLabel:SetPos(15, 15)
-                        nameLabel:SizeToContents()
-
-                        local classLabel = vgui.Create("DLabel", templatePanel)
-                        classLabel:SetText("Class: " .. (template.class_ent or "N/A"))
-                        classLabel:SetFont("DermaDefault")
-                        classLabel:SetTextColor(Color(200, 200, 200))
-                        classLabel:SetPos(15, 35)
-                        classLabel:SizeToContents()
-
-                        local sideLabel = vgui.Create("DLabel", templatePanel)
-                        sideLabel:SetText("Side: " .. (template.installation_side or "N/A"))
-                        sideLabel:SetFont("DermaDefault")
-                        sideLabel:SetTextColor(Color(200, 200, 200))
-                        sideLabel:SetPos(15, 55)
-                        sideLabel:SizeToContents()
-
-                        local modelLabel = vgui.Create("DLabel", templatePanel)
-                        modelLabel:SetText("Model: " .. (template.validator_model_path or "N/A"))
-                        modelLabel:SetFont("DermaDefault")
-                        modelLabel:SetTextColor(Color(200, 200, 200))
-                        modelLabel:SetPos(15, 75)
-                        modelLabel:SizeToContents()
-
-                        local validatorCount = CountValidatorsInTemplate(template)
-
-                        local countLabel = vgui.Create("DLabel", templatePanel)
-                        countLabel:SetText("Validators: " .. validatorCount .. " / 6")
-                        countLabel:SetFont("DermaDefault")
-                        countLabel:SetTextColor(validatorCount > 0 and Color(100, 255, 100) or Color(255, 100, 100))
-                        countLabel:SetPos(15, 95)
-                        countLabel:SizeToContents()
-
-                        local buttonPanel = vgui.Create("DPanel", templatePanel)
-                        buttonPanel:SetSize(200, 80)
-                        buttonPanel:SetPos(templatePanel:GetWide() - 210, 30)
-                        buttonPanel.Paint = function() end
-
-                        local infoBtn = vgui.Create("DButton", buttonPanel)
-                        infoBtn:SetText("Info")
-                        infoBtn:SetFont("DermaDefault")
-                        infoBtn:SetSize(60, 35)
-                        infoBtn:SetPos(0, 0)
-                        infoBtn.Paint = function(s, ww, hh)
-                            surface.SetDrawColor(0, 100, 200, 180)
-                            surface.DrawRect(0, 0, ww, hh)
-                        end
-                        infoBtn.DoClick = function()
-                            local validatorDetails = ""
-                            for j = 1, 6 do
-                                if HasValidatorCoordinates(template, j) then
-                                    local pos_x = template["val"..j.."_pos_x"] or 0
-                                    local pos_y = template["val"..j.."_pos_y"] or 0
-                                    local pos_z = template["val"..j.."_pos_z"] or 0
-                                    validatorDetails = validatorDetails .. string.format("\nValidator %d: (%.1f, %.1f, %.1f)", j, pos_x, pos_y, pos_z)
-                                end
-                            end
-                            
-                            local infoText = string.format(
-                                "Template: %s\nClass: %s\nSide: %s\nModel: %s\nValidators: %d/6%s\n\n%s",
-                                template.name_shablon_valid or "N/A",
-                                template.class_ent or "N/A", 
-                                template.installation_side or "N/A",
-                                template.validator_model_path or "N/A",
-                                validatorCount,
-                                validatorDetails,
-                                template.class_ent == class and "✓ Compatible with this vehicle" or "✗ Not compatible with this vehicle"
-                            )
-                            
-                            Derma_Message(infoText, "Template Information", "OK")
-                        end
-
-                        local useBtn = vgui.Create("DButton", buttonPanel)
-                        useBtn:SetText("Apply")
-                        useBtn:SetFont("DermaDefault")
-                        useBtn:SetSize(120, 35)
-                        useBtn:SetPos(70, 0)
-                        useBtn:SetEnabled(validatorCount > 0 and template.class_ent == class)
-                        useBtn.Paint = function(s, ww, hh)
-                            if s:IsEnabled() then
-                                surface.SetDrawColor(0, 150, 50, 180)
-                            else
-                                surface.SetDrawColor(100, 100, 100, 100)
-                            end
-                            surface.DrawRect(0, 0, ww, hh)
-                        end
-                        useBtn.DoClick = function()
-                            if not useBtn:IsEnabled() then return end
-                            
-                            Derma_Query("Apply template '" .. (template.name_shablon_valid or "Unknown") .. "'?\nWill install " .. validatorCount .. " validators.", "Confirmation",
-                                "Yes", function()
-                                    net.Start("validator_tool_apply_template")
-                                    net.WriteEntity(ent)
-                                    net.WriteString(template.name_shablon_valid or "")
-                                    net.SendToServer()
-                                end,
-                                "No", function() end
-                            )
-                        end
-
-                        local warnings = {}
-                        if template.class_ent ~= class then
-                            table.insert(warnings, "✗ Incompatible vehicle")
-                        end
-                        if validatorCount == 0 then
-                            table.insert(warnings, "✗ No validators configured")
-                        end
-
-                        if #warnings > 0 then
-                            local warningText = table.concat(warnings, " | ")
-                            local warningLabel = vgui.Create("DLabel", templatePanel)
-                            warningLabel:SetText(warningText)
-                            warningLabel:SetFont("DermaDefault")
-                            warningLabel:SetTextColor(Color(255, 100, 100))
-                            warningLabel:SetPos(15, 115)
-                            warningLabel:SizeToContents()
-                        end
-                    end
-                end
-
-                timer.Remove("RefreshTemplates")
-                ActiveTimers["RefreshTemplates"] = true
-                timer.Create("RefreshTemplates", 0.5, 0, RefreshTemplatesList)
-                RefreshTemplatesList()
-
-            elseif activeTab == 3 then
-                local newTemplateLabel = vgui.Create("DLabel", contentPanel)
-                newTemplateLabel:SetText("Create New Template")
-                newTemplateLabel:SetFont("DermaDefaultBold")
-                newTemplateLabel:SetTextColor(Color(255, 255, 255))
-                newTemplateLabel:Dock(TOP)
-                newTemplateLabel:SetTall(40)
-                newTemplateLabel:DockMargin(10, 20, 10, 10)
-                newTemplateLabel:SetContentAlignment(5)
-
-                local infoLabel = vgui.Create("DLabel", contentPanel)
-                infoLabel:SetText("Feature in development")
-                infoLabel:SetFont("DermaDefault")
-                infoLabel:SetTextColor(Color(150, 150, 150))
-                infoLabel:Dock(TOP)
-                infoLabel:SetTall(30)
-                infoLabel:DockMargin(10, 0, 10, 10)
-                infoLabel:SetContentAlignment(5)
-
-            elseif activeTab == 4 then
-                local settingsLabel = vgui.Create("DLabel", contentPanel)
-                settingsLabel:SetText("Validator Settings")
-                settingsLabel:SetFont("DermaDefaultBold")
-                settingsLabel:SetTextColor(Color(255, 255, 255))
-                settingsLabel:Dock(TOP)
-                settingsLabel:SetTall(40)
-                settingsLabel:DockMargin(10, 20, 10, 10)
-                settingsLabel:SetContentAlignment(5)
-
-                local infoLabel = vgui.Create("DLabel", contentPanel)
-                infoLabel:SetText("Feature in development")
-                infoLabel:SetFont("DermaDefault")
-                infoLabel:SetTextColor(Color(150, 150, 150))
-                infoLabel:Dock(TOP)
-                infoLabel:SetTall(30)
-                infoLabel:DockMargin(10, 0, 10, 10)
-                infoLabel:SetContentAlignment(5)
-
-            elseif activeTab == 5 then
-                RequestVehicleInfo(class)
-                
-                local infoLabel = vgui.Create("DLabel", contentPanel)
-                infoLabel:SetText("Vehicle Information")
-                infoLabel:SetFont("DermaDefaultBold")
-                infoLabel:SetTextColor(Color(255, 255, 255))
-                infoLabel:Dock(TOP)
-                infoLabel:SetTall(40)
-                infoLabel:DockMargin(10, 20, 10, 10)
-                infoLabel:SetContentAlignment(5)
-
-                local infoScroll = vgui.Create("DScrollPanel", contentPanel)
-                infoScroll:Dock(FILL)
-                infoScroll:DockMargin(20, 0, 20, 20)
-
-                local function RefreshVehicleInfo()
-                    if not IsValid(infoScroll) then return end
-                    
-                    infoScroll:Clear()
-                    
-                    local infoPanel = vgui.Create("DPanel", infoScroll)
-                    infoPanel:Dock(TOP)
-                    infoPanel:SetTall(300)
-                    infoPanel:DockMargin(0, 0, 0, 10)
-                    infoPanel.Paint = function(s, ww, hh)
-                        surface.SetDrawColor(40, 40, 40, 220)
-                        surface.DrawRect(0, 0, ww, hh)
-                        surface.SetDrawColor(0, 120, 255, 60)
-                        surface.DrawOutlinedRect(0, 0, ww, hh, 1)
-                    end
-
-                    local yPos = 20
-                    local function AddInfoLine(text, value, color)
-                        color = color or Color(255, 255, 255)
-                        local label = vgui.Create("DLabel", infoPanel)
-                        label:SetText(text .. ": " .. (value or "N/A"))
-                        label:SetFont("DermaDefault")
-                        label:SetTextColor(color)
-                        label:SetPos(20, yPos)
-                        label:SizeToContents()
-                        yPos = yPos + 25
-                    end
-
-                    AddInfoLine("Vehicle Class", CurrentVehicleInfo.vehicle_class)
-                    AddInfoLine("Vehicle Name", CurrentVehicleInfo.vehicle_name)
-                    AddInfoLine("Added By", CurrentVehicleInfo.added_by_steamid or "Unknown")
-                    AddInfoLine("Date Added", CurrentVehicleInfo.added_date or "Unknown")
-                    AddInfoLine("Has Trailer", CurrentVehicleInfo.has_trailer and "Yes" or "No")
-                    
-                    if CurrentVehicleInfo.has_trailer then
-                        AddInfoLine("Trailer Class", CurrentVehicleInfo.trailer_class)
-                    end
-                end
-
-                timer.Remove("RefreshVehicleInfo")
-                ActiveTimers["RefreshVehicleInfo"] = true
-                timer.Create("RefreshVehicleInfo", 0.5, 0, RefreshVehicleInfo)
-                RefreshVehicleInfo()
-            end
-        end
-
-        for i, tabData in ipairs(tabs) do
-            local tabName, isActive = tabData[1], tabData[2]
-            local btn = vgui.Create("DButton", tabPanel)
-            btn:SetText(tabName)
-            btn:SetFont("DermaDefault")
-            btn:SetTextColor(isActive and Color(255, 255, 255) or Color(150, 150, 150))
-            btn:Dock(LEFT)
-            btn:SetWide(tabWidths[i])
-            btn:DockMargin(2, 2, 2, 2)
-            btn.Paint = function(s, ww, hh)
-                if activeTab == i then
-                    surface.SetDrawColor(0, 120, 255, 200)
-                    surface.DrawRect(0, 0, ww, hh)
-                else
-                    surface.SetDrawColor(50, 50, 50, 150)
-                    surface.DrawRect(0, 0, ww, hh)
-                end
-            end
-            btn.DoClick = function()
-                activeTab = i
-                for j, tabBtn in ipairs(tabButtons) do
-                    tabBtn:SetTextColor(j == i and Color(255, 255, 255) or Color(150, 150, 150))
-                end
-                UpdateContent()
-            end
-            tabButtons[i] = btn
-        end
-
-        UpdateContent()
-
-        local bottomPanel = vgui.Create("DPanel", frame)
-        bottomPanel:Dock(BOTTOM)
-        bottomPanel:SetTall(50)
-        bottomPanel.Paint = function(s, ww, hh)
-            surface.SetDrawColor(20, 20, 20, 220)
-            surface.DrawRect(0, 0, ww, hh)
-        end
-
-        local closeBtn = vgui.Create("DButton", bottomPanel)
-        closeBtn:SetText("CLOSE")
-        closeBtn:SetFont("DermaDefault")
-        closeBtn:SetTextColor(Color(255, 255, 255))
-        closeBtn:SetWide(150)
-        closeBtn:Dock(RIGHT)
-        closeBtn:DockMargin(0, 10, 10, 10)
-        closeBtn.Paint = function(s, ww, hh)
-            surface.SetDrawColor(200, 40, 40, 180)
-            surface.DrawRect(0, 0, ww, hh)
-        end
-        closeBtn.DoClick = function()
-            StopAllTimers()
-            frame:Close()
-        end
-    end
-
-    net.Receive("validator_tool_open_gui", function()
-        local ent = net.ReadEntity()
-        local class = net.ReadString()
-        local vehicle_name = net.ReadString()
-        local installed_count = net.ReadInt(16)
-        local max_count = net.ReadInt(16)
-
-        ent._Validators = ent._Validators or {}
-        OpenValidatorMenu(class, vehicle_name, ent, installed_count, max_count)
-    end)
 end
